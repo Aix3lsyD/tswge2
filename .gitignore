@@ -1,0 +1,73 @@
+# History files
+.Rhistory
+.Rapp.history
+
+# Session Data files
+.RData
+.RDataTmp
+
+# User-specific files
+.Ruserdata
+
+# RStudio files
+.Rproj.user/
+*.Rproj
+
+# R Environment Variables
+.Renviron
+
+# OAuth token (if using googlesheets, etc.)
+.httr-oauth
+
+# knitr and R Markdown
+*_cache/
+/cache/
+*.html
+*_files/
+
+# Temporary files
+*~
+\#*\#
+.\#*
+
+# Compiled code (generated during install, not needed in repo)
+src/*.o
+src/*.so
+src/*.dll
+src/*.a
+
+# But DO commit these (they're auto-generated but needed):
+# - src/RcppExports.cpp
+# - R/RcppExports.R
+
+# Package build files
+*.tar.gz
+*.Rcheck/
+*.zip
+
+# pkgdown site
+docs/
+
+# Bookdown
+_book/
+_bookdown_files/
+
+# Byte-compiled files
+*.pyc
+__pycache__/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Local dev files you might create
+scratch/
+dev/
+notes/
+TODO.md
+.vscode/
