@@ -1,28 +1,64 @@
-library(ggplot2)
-
-gen.aruma.tse <- function(n, phi=0, theta=0, d=0, s=0, lambda=0, 
-                          innov_gen=NULL, plot=TRUE, sn=0)
-{
-  # n: realization length
-  # phi: vector of AR parameters (ATSA sign convention)
-  # theta: vector of MA parameters (ATSA sign convention)
-  # d: order of difference operator
-  # s: order of seasonal operator
-  # lambda: vector of parameters in nonstationary operator lambda(B)
-  # innov_gen: function with signature function(n) returning numeric vector of length n
-  #            with mean zero. If NULL, uses rnorm(n, mean=0, sd=1).
-  # plot: if TRUE, plot the generated realization
-  # sn: seed for reproducibility (0 = no seed)
-  
+#' Generate ARUMA Realizations with Flexible Innovations
+#'
+#' Generates realizations from ARUMA (ARIMA with possible seasonal and
+#' nonstationary components) models with custom innovation distributions.
+#'
+#' @param n Integer. Length of the realization to generate.
+#' @param phi Numeric vector. AR parameters (ATSA sign convention).
+#'   Default is 0 (no AR component).
+#' @param theta Numeric vector. MA parameters (ATSA sign convention).
+#'   Default is 0 (no MA component).
+#' @param d Integer. Order of differencing. Default is 0.
+#' @param s Integer. Order of seasonal differencing. Default is 0.
+#' @param lambda Numeric vector. Parameters in nonstationary operator.
+#'   Default is 0.
+#' @param innov_gen Function. Innovation generator with signature
+#'   \code{function(n)} returning a numeric vector of length n with mean zero.
+#'   If \code{NULL} (default), uses standard normal innovations.
+#' @param plot Logical. If \code{TRUE} (default), plot the realization.
+#' @param sn Integer. Random seed for reproducibility. Default is 0 (no seed).
+#'
+#' @return An object of class \code{"aruma"} containing:
+#'   \describe{
+#'     \item{y}{Numeric vector of the generated realization}
+#'     \item{innovations}{Numeric vector of innovations used}
+#'     \item{n, p, q, d, s}{Model orders}
+#'     \item{phi, theta, lambda}{Model parameters}
+#'     \item{plot}{A ggplot object of the realization}
+#'   }
+#'
+#' @seealso \code{\link{make.gen.garch.tse}}, \code{\link{make.gen.t.tse}},
+#'   \code{\link{make.gen.norm.tse}}
+#'
+#' @export
+#'
+#' @examples
+#' # Simple AR(1) with normal innovations
+#' result <- gen.aruma.tse(n = 200, phi = 0.7, sn = 123)
+#'
+#' # ARMA(1,1) with GARCH(1,1) innovations
+#' garch_gen <- make.gen.garch.tse(omega = 0.1, alpha = 0.15, beta = 0.8)
+#' result <- gen.aruma.tse(n = 500, phi = 0.7, theta = 0.3,
+#'                         innov_gen = garch_gen, sn = 42)
+#'
+#' # ARIMA(1,1,1) with t-distributed innovations
+#' t_gen <- make.gen.t.tse(df = 5)
+#' result <- gen.aruma.tse(n = 500, phi = 0.7, theta = 0.3, d = 1,
+#'                         innov_gen = t_gen, sn = 42)
+gen.aruma.tse <- function(n, phi = 0, theta = 0, d = 0, s = 0, lambda = 0,
+                          innov_gen = NULL, plot = TRUE, sn = 0) {
   # Set seed if provided (before any random generation)
-  if (sn > 0) {set.seed(sn)}
+  if (sn > 0) {
+    set.seed(sn)
+  }
   
   # Default innovation generator: standard normal
   if (is.null(innov_gen)) {
-    innov_gen <- function(n) rnorm(n, mean=0, sd=1)
+    innov_gen <- function(n) rnorm(n, mean = 0, sd = 1)
   }
   
   # Convert parameters for arima.sim
+  
   # arima.sim uses opposite sign convention for MA
   ar <- phi
   ma <- -theta
@@ -59,23 +95,23 @@ gen.aruma.tse <- function(n, phi=0, theta=0, d=0, s=0, lambda=0,
   
   # Simulate ARMA process with our custom innovations
   if ((p > 0) & (q > 0)) {
-    tsdata <- arima.sim(n=ngen, model=list(order=c(p, d, q), ar=ar, ma=ma), innov=innovations)
+    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ar = ar, ma = ma), innov = innovations)
   }
   if ((p == 0) & (q > 0)) {
-    tsdata <- arima.sim(n=ngen, model=list(order=c(p, d, q), ma=ma), innov=innovations)
+    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ma = ma), innov = innovations)
   }
   if ((p > 0) & (q == 0)) {
-    tsdata <- arima.sim(n=ngen, model=list(order=c(p, d, q), ar=ar), innov=innovations)
+    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ar = ar), innov = innovations)
   }
   if ((p == 0) & (q == 0)) {
-    tsdata <- arima.sim(n=ngen, model=list(order=c(0, d, 0)), innov=innovations)
+    tsdata <- arima.sim(n = ngen, model = list(order = c(0, d, 0)), innov = innovations)
   }
   
-  # Compute the inverse of the nonstationary operator (similar to diffinv in R)
+  # Compute the inverse of the nonstationary operator
   y <- as.numeric(tsdata)
   
   if ((dlam > 0) & (s > 0)) {
-    temp <- mult.wge(fac1=lambda, fac2=seas)
+    temp <- mult.wge(fac1 = lambda, fac2 = seas)
     lambdas <- temp$model.coef
   }
   if ((dlam > 0) & (s == 0)) {
@@ -104,7 +140,7 @@ gen.aruma.tse <- function(n, phi=0, theta=0, d=0, s=0, lambda=0,
     for (i in d1:ndspin) {
       xfull[i] <- y[i]
       for (j in 1:dlams) {
-        xfull[i] <- xfull[i] + lambdas[j] * xfull[i-j]
+        xfull[i] <- xfull[i] + lambdas[j] * xfull[i - j]
       }
     }
   }
@@ -118,13 +154,13 @@ gen.aruma.tse <- function(n, phi=0, theta=0, d=0, s=0, lambda=0,
   
   # Build ggplot object
   df <- data.frame(time = 1:n, y = y_final)
-  gg <- ggplot(df, aes(x = time, y = y)) +
-    geom_line(color = "steelblue", linewidth = 0.5) +
-    labs(x = "Time", y = "Value", title = "ARUMA Realization") +
-    theme_minimal() +
-    theme(
-      plot.title = element_text(hjust = 0.5),
-      panel.grid.minor = element_blank()
+  gg <- ggplot2::ggplot(df, ggplot2::aes(x = time, y = y)) +
+    ggplot2::geom_line(color = "steelblue", linewidth = 0.5) +
+    ggplot2::labs(x = "Time", y = "Value", title = "ARUMA Realization") +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(hjust = 0.5),
+      panel.grid.minor = ggplot2::element_blank()
     )
   
   # Show plot if requested
@@ -135,7 +171,7 @@ gen.aruma.tse <- function(n, phi=0, theta=0, d=0, s=0, lambda=0,
   # Build result object
   result <- list(
     y = y_final,
-    innovations = innovations[1:n],  # return just the n used for output
+    innovations = innovations[1:n],
     n = n,
     p = p,
     q = q,
@@ -153,10 +189,17 @@ gen.aruma.tse <- function(n, phi=0, theta=0, d=0, s=0, lambda=0,
 }
 
 
-# Print method for aruma class
+#' Print Method for aruma Objects
+#'
+#' @param x An object of class \code{"aruma"}.
+#' @param ... Additional arguments (ignored).
+#'
+#' @return Invisibly returns \code{x}.
+#'
+#' @export
 print.aruma <- function(x, ...) {
   cat("ARUMA Realization\n")
-  cat(sprintf("n = %d, p = %d, q = %d, d = %d, s = %d\n", 
+  cat(sprintf("n = %d, p = %d, q = %d, d = %d, s = %d\n",
               x$n, x$p, x$q, x$d, x$s))
   
   if (x$p > 0) {
@@ -170,13 +213,21 @@ print.aruma <- function(x, ...) {
   }
   
   cat("\nFirst 6 values of y:\n")
-  print(head(x$y))
+  print(utils::head(x$y))
   
   invisible(x)
 }
 
 
-# Plot method for aruma class
+#' Plot Method for aruma Objects
+#'
+#' @param x An object of class \code{"aruma"}.
+#' @param ... Additional arguments (ignored).
+#'
+#' @return Invisibly returns the ggplot object.
+#'
+#' @export
 plot.aruma <- function(x, ...) {
   print(x$plot)
+  invisible(x$plot)
 }
