@@ -64,6 +64,12 @@ The standard GARCH(q, p) model specifies the conditional variance as:
 
 For stationarity of standard GARCH, we require
 \code{sum(alpha) + sum(beta) < 1}.
+
+\strong{Important}: This generator returns \eqn{\epsilon_t = \sigma_t z_t},
+which are \emph{not} iid—they exhibit time-varying conditional variance
+(volatility clustering). When passed to \code{\link{gen.aruma.tse}}, the
+result is a proper ARMA-GARCH process where the ARMA filter is applied
+to the heteroskedastic innovations.
 }
 \examples{
 # Standard GARCH(1,1) with normal innovations

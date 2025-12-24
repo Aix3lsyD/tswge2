@@ -4,19 +4,18 @@
 \alias{make.gen.norm.tse}
 \title{Create a Normal Innovation Generator}
 \usage{
-make.gen.norm.tse(mean = 0, sd = 1)
+make.gen.norm.tse(sd = 1)
 }
 \arguments{
-\item{mean}{Mean of the distribution (default 0)}
-
-\item{sd}{Standard deviation (default 1)}
+\item{sd}{Standard deviation (default 1).}
 }
 \value{
 A function with signature \code{function(n)} that generates
-\code{n} normal innovations.
+\code{n} normal innovations with mean zero.
 }
 \description{
-Factory function that returns a normal (Gaussian) innovation generator.
+Factory function that returns a normal (Gaussian) innovation generator
+with mean zero.
 }
 \examples{
 # Default standard normal
@@ -26,7 +25,4 @@ innovations <- norm_gen(100)
 # Higher variance innovations
 norm_gen_hv <- make.gen.norm.tse(sd = 2)
 innovations_hv <- norm_gen_hv(100)
-
-# Use with ARMA simulation
-# result <- gen.aruma.wge(n = 500, phi = 0.7, innov_gen = make.gen.norm.tse())
 }

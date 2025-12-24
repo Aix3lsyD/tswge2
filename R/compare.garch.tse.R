@@ -22,7 +22,7 @@
 #' the trivial (0,0) case) and computes AIC, AICc, BIC, Weighted Ljung-Box
 #' tests, Nyblom stability test, and Sign Bias test.
 #'
-#' @export
+#' @export compare.garch.tse
 #'
 #' @examples
 #' \dontrun{
@@ -44,6 +44,10 @@ compare.garch.tse <- function(data,
   
   if (!requireNamespace("dplyr", quietly = TRUE)) {
     stop("Package 'dplyr' is required. Install with: install.packages('dplyr')")
+  }
+  
+  if (!requireNamespace("WeightedPortTest", quietly = TRUE)) {
+    stop("Package 'WeightedPortTest' is required. Install with: install.packages('WeightedPortTest')")
   }
   
   # Input validation
@@ -144,16 +148,33 @@ compare.garch.tse <- function(data,
 .extract_garch_diagnostics <- function(fit, arch_order, garch_order, n) {
   
   std_resid <- as.numeric(rugarch::residuals(fit, standardize = TRUE))
+  
+  # Count parameters: omega + arch coefficients + garch coefficients
+  # Plus distribution params if non-normal (shape, skew, etc.)
   k <- arch_order + garch_order + 1
   
-  # Information criteria
-  ic <- rugarch::infocriteria(fit)
-  aic <- ic["Akaike", ]
-  bic <- ic["Bayes", ]
+  # Add distribution parameters to k
+  dist <- fit@model$modeldesc$distribution
+  if (dist %in% c("std", "ged")) {
+    k <- k + 1  # shape parameter
+  } else if (dist %in% c("snorm", "sged")) {
+    k <- k + 1  # skew parameter
+  } else if (dist %in% c("sstd")) {
+    k <- k + 2
+  } else if (dist %in% c("nig", "ghyp", "jsu")) {
+    k <- k + 2  # shape + skew
+  }
+  
+  # Information criteria computed from likelihood directly
+  # This avoids confusion about rugarch's per-observation scaling
+  ll <- rugarch::likelihood(fit)
+  aic <- -2 * ll + 2 * k
+  bic <- -2 * ll + k * log(n)
   aicc <- aic + (2 * k^2 + 2 * k) / (n - k - 1)
   
   # Weighted Ljung-Box on squared standardized residuals
-  df_garch <- arch_order + garch_order
+  # Ensure df_garch is at least 1 for lag calculation
+  df_garch <- max(1, arch_order + garch_order)
   wlb <- tryCatch({
     box1 <- WeightedPortTest::Weighted.Box.test(std_resid, lag = 1, 
                                                 type = "Ljung-Box", fitdf = 0, sqrd.res = TRUE)
@@ -165,7 +186,7 @@ compare.garch.tse <- function(data,
                                                 type = "Ljung-Box", fitdf = df_garch, sqrd.res = TRUE)
     c(box1$p.value, box2$p.value, box3$p.value)
   }, error = function(e) {
-    c(NA, NA, NA)
+    c(NA_real_, NA_real_, NA_real_)
   })
   wlb_pvals <- wlb
   
@@ -173,7 +194,7 @@ compare.garch.tse <- function(data,
   nyb <- tryCatch({
     rugarch::nyblom(fit)
   }, error = function(e) {
-    list(JointStat = NA, JointCritical = c("5%" = NA))
+    list(JointStat = NA_real_, JointCritical = c("5%" = NA_real_))
   })
   nyblom_stat <- nyb$JointStat
   nyblom_crit <- nyb$JointCritical["5%"]
@@ -182,14 +203,14 @@ compare.garch.tse <- function(data,
   sb <- tryCatch({
     rugarch::signbias(fit)
   }, error = function(e) {
-    matrix(c(NA, NA, NA, NA, NA, NA, NA, NA), nrow = 4, ncol = 2)
+    matrix(NA_real_, nrow = 4, ncol = 2)
   })
   signbias_pval <- sb[4, 2]
   
   # Coefficient significance
   coef_mat <- fit@fit$matcoef
   n_coef <- nrow(coef_mat)
-  n_sig <- sum(coef_mat[, 4] < 0.05)
+  n_sig <- sum(coef_mat[, 4] < 0.05, na.rm = TRUE)
   
   list(
     aic = aic,

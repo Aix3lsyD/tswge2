@@ -20,6 +20,8 @@ Imports:
     astsa,
     tidyverse,
     zoo,
+    sn,
+    fGarch,
     plotrix,
     dplyr,
     ggplot2,

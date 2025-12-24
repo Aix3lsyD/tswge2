@@ -4,22 +4,22 @@
 \alias{make.gen.t.tse}
 \title{Create a Student's t Innovation Generator}
 \usage{
-make.gen.t.tse(df, scale = TRUE)
+make.gen.t.tse(df, scale = FALSE)
 }
 \arguments{
 \item{df}{Degrees of freedom. Must be > 2 for finite variance when
 \code{scale = TRUE}.}
 
-\item{scale}{Logical. If \code{TRUE} (default), scale to unit variance.
-Requires \code{df > 2}.}
+\item{scale}{Logical. If \code{TRUE}, scale to unit variance.
+Requires \code{df > 2}. Default is \code{FALSE}.}
 }
 \value{
 A function with signature \code{function(n)} that generates
-\code{n} t-distributed innovations.
+\code{n} t-distributed innovations with mean zero.
 }
 \description{
 Factory function that returns a t-distributed innovation generator.
-By default, the output is scaled to have unit variance for comparability
+Optionally scales output to have unit variance for comparability
 with normal innovations.
 }
 \details{
@@ -29,17 +29,21 @@ output is divided by \code{sqrt(df / (df - 2))} to achieve unit variance.
 
 For \code{df <= 2}, the variance is infinite, so scaling is not possible
 and will be disabled with a warning.
+
+Heavy-tailed innovations are useful for simulating financial returns
+and other processes where extreme values occur more frequently than
+a normal distribution predicts.
 }
 \examples{
 # Heavy-tailed innovations (df = 5)
 t_gen <- make.gen.t.tse(df = 5)
-innovations <- t_gen(100)
-var(innovations)  # approximately 1
+innovations <- t_gen(1000)
+var(innovations)  # approximately 5/3 = 1.67
+
+# Scaled to unit variance
+t_gen_scaled <- make.gen.t.tse(df = 5, scale = TRUE)
+var(t_gen_scaled(1000))  # approximately 1
 
 # Very heavy tails (df = 3)
 t_gen_heavy <- make.gen.t.tse(df = 3)
-
-# Unscaled t innovations
-t_gen_raw <- make.gen.t.tse(df = 5, scale = FALSE)
-var(t_gen_raw(10000))
 }

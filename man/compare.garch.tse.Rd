@@ -4,7 +4,7 @@
 \alias{compare.garch.tse}
 \title{Compare Multiple GARCH Model Specifications}
 \usage{
-compare.garch.tse(
+\method{compare}{garch.tse}(
   data,
   arch.range = 0:2,
   garch.range = 0:2,

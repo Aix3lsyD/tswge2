@@ -11,6 +11,16 @@
 # ==============================================================================
 
 #' @noRd
+.garch_label <- function(arch_order, garch_order) {
+  if (garch_order == 0) {
+    paste0("ARCH(", arch_order, ")")
+  } else {
+    paste0("GARCH(", arch_order, ",", garch_order, ")")
+  }
+}
+
+
+#' @noRd
 .fmt_pval <- function(p, digits = 3) {
   if (is.na(p)) {
     return("NA")
@@ -25,15 +35,25 @@
 
 #' @noRd
 .find_best_indices <- function(df) {
+  # Safe wrappers that handle all-NA columns
+  safe_which_min <- function(x) {
+    if (all(is.na(x))) return(NA_integer_)
+    which.min(x)
+  }
+  safe_which_max <- function(x) {
+    if (all(is.na(x))) return(NA_integer_)
+    which.max(x)
+  }
+  
   list(
-    aic = which.min(df$AIC),
-    bic = which.min(df$BIC),
-    aicc = which.min(df$AICC),
-    wlb1 = which.max(df$WLB1),
-    wlb2 = which.max(df$WLB2),
-    wlb3 = which.max(df$WLB3),
-    nyblom = which.min(df$Nyblom),
-    signbias = which.max(df$SignBias)
+    aic = safe_which_min(df$AIC),
+    bic = safe_which_min(df$BIC),
+    aicc = safe_which_min(df$AICC),
+    wlb1 = safe_which_max(df$WLB1),
+    wlb2 = safe_which_max(df$WLB2),
+    wlb3 = safe_which_max(df$WLB3),
+    nyblom = safe_which_min(df$Nyblom),
+    signbias = safe_which_max(df$SignBias)
   )
 }
 
@@ -111,8 +131,8 @@ table.garch.gt.tse <- function(results,
   display_df$WLB1_fmt <- sapply(df$WLB1, .fmt_pval)
   display_df$WLB2_fmt <- sapply(df$WLB2, .fmt_pval)
   display_df$WLB3_fmt <- sapply(df$WLB3, .fmt_pval)
-  display_df$Nyblom_fmt <- sprintf("%.2f", df$Nyblom)
-  display_df$Nyblom_pass <- df$Nyblom < df$Nyblom_crit
+  display_df$Nyblom_fmt <- ifelse(is.na(df$Nyblom), "NA", sprintf("%.2f", df$Nyblom))
+  display_df$Nyblom_pass <- !is.na(df$Nyblom) & !is.na(df$Nyblom_crit) & df$Nyblom < df$Nyblom_crit
   display_df$SignBias_fmt <- sapply(df$SignBias, .fmt_pval)
   display_df$CoefSig <- paste0(df$n_sig, "/", df$n_coef)
   display_df$CoefSig_pass <- df$n_sig == df$n_coef
@@ -148,68 +168,68 @@ table.garch.gt.tse <- function(results,
     gt::cols_align(align = "left", columns = Model) |>
     gt::tab_style(style = gt::cell_text(weight = "bold"), locations = gt::cells_body(columns = Model))
   
-  # Highlight best IC (green bold)
+  # Highlight best IC (green bold) - with NA handling
   tbl <- tbl |>
     gt::tab_style(
       style = gt::cell_text(color = color.best, weight = "bold"),
-      locations = gt::cells_body(columns = AIC, rows = AIC == min(AIC))
+      locations = gt::cells_body(columns = AIC, rows = !is.na(AIC) & AIC == min(AIC, na.rm = TRUE))
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.best, weight = "bold"),
-      locations = gt::cells_body(columns = AICC, rows = AICC == min(AICC))
+      locations = gt::cells_body(columns = AICC, rows = !is.na(AICC) & AICC == min(AICC, na.rm = TRUE))
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.best, weight = "bold"),
-      locations = gt::cells_body(columns = BIC, rows = BIC == min(BIC))
+      locations = gt::cells_body(columns = BIC, rows = !is.na(BIC) & BIC == min(BIC, na.rm = TRUE))
     )
   
-  # Highlight best WLB p-values (green bold) and failures (red)
+  # Highlight best WLB p-values (green bold) and failures (red) - with NA handling
   tbl <- tbl |>
     gt::tab_style(
       style = gt::cell_text(color = color.best, weight = "bold"),
-      locations = gt::cells_body(columns = WLB1_fmt, rows = WLB1 == max(WLB1))
+      locations = gt::cells_body(columns = WLB1_fmt, rows = !is.na(WLB1) & WLB1 == max(WLB1, na.rm = TRUE))
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.best, weight = "bold"),
-      locations = gt::cells_body(columns = WLB2_fmt, rows = WLB2 == max(WLB2))
+      locations = gt::cells_body(columns = WLB2_fmt, rows = !is.na(WLB2) & WLB2 == max(WLB2, na.rm = TRUE))
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.best, weight = "bold"),
-      locations = gt::cells_body(columns = WLB3_fmt, rows = WLB3 == max(WLB3))
+      locations = gt::cells_body(columns = WLB3_fmt, rows = !is.na(WLB3) & WLB3 == max(WLB3, na.rm = TRUE))
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.fail),
-      locations = gt::cells_body(columns = WLB1_fmt, rows = WLB1 < 0.05)
+      locations = gt::cells_body(columns = WLB1_fmt, rows = !is.na(WLB1) & WLB1 < 0.05)
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.fail),
-      locations = gt::cells_body(columns = WLB2_fmt, rows = WLB2 < 0.05)
+      locations = gt::cells_body(columns = WLB2_fmt, rows = !is.na(WLB2) & WLB2 < 0.05)
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.fail),
-      locations = gt::cells_body(columns = WLB3_fmt, rows = WLB3 < 0.05)
+      locations = gt::cells_body(columns = WLB3_fmt, rows = !is.na(WLB3) & WLB3 < 0.05)
     )
   
-  # Nyblom: lower is better, red if unstable
+  # Nyblom: lower is better, red if unstable - with NA handling
   tbl <- tbl |>
     gt::tab_style(
       style = gt::cell_text(color = color.best, weight = "bold"),
-      locations = gt::cells_body(columns = Nyblom_fmt, rows = Nyblom == min(Nyblom))
+      locations = gt::cells_body(columns = Nyblom_fmt, rows = !is.na(Nyblom) & Nyblom == min(Nyblom, na.rm = TRUE))
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.fail),
-      locations = gt::cells_body(columns = Nyblom_fmt, rows = Nyblom >= Nyblom_crit)
+      locations = gt::cells_body(columns = Nyblom_fmt, rows = !is.na(Nyblom) & !is.na(Nyblom_crit) & Nyblom >= Nyblom_crit)
     )
   
-  # Sign Bias: higher p-value is better
+  # Sign Bias: higher p-value is better - with NA handling
   tbl <- tbl |>
     gt::tab_style(
       style = gt::cell_text(color = color.best, weight = "bold"),
-      locations = gt::cells_body(columns = SignBias_fmt, rows = SignBias == max(SignBias))
+      locations = gt::cells_body(columns = SignBias_fmt, rows = !is.na(SignBias) & SignBias == max(SignBias, na.rm = TRUE))
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.fail),
-      locations = gt::cells_body(columns = SignBias_fmt, rows = SignBias < 0.05)
+      locations = gt::cells_body(columns = SignBias_fmt, rows = !is.na(SignBias) & SignBias < 0.05)
     )
   
   # Coefficient significance
@@ -301,20 +321,29 @@ table.garch.cli.tse <- function(results, show.signbias = TRUE) {
   
   # Column widths
   w_model <- 12
-  w_ic <- 8
+  w_ic <- 10
   w_wlb <- 7
   w_nyb <- 7
   w_sb <- 9
   w_coef <- 5
   sep <- " "
   
-  # Formatting helpers (apply styling after sprintf)
-  fmt_ic <- function(val, is_best) {
-    s <- sprintf("%*.2f", w_ic, val)
-    if (is_best) cli::col_green(cli::style_bold(s)) else s
+  # Helper to check if index matches best (handles NA)
+  is_best <- function(i, best_idx) {
+    !is.na(best_idx) && i == best_idx
   }
   
-  fmt_pval <- function(val, is_best, width = w_wlb) {
+  # Formatting helpers (apply styling after sprintf)
+  fmt_ic <- function(val, is_best_val) {
+    if (is.na(val)) {
+      s <- sprintf("%*s", w_ic, "NA")
+      return(s)
+    }
+    s <- sprintf("%*.2f", w_ic, val)
+    if (is_best_val) cli::col_green(cli::style_bold(s)) else s
+  }
+  
+  fmt_pval <- function(val, is_best_val, width = w_wlb) {
     if (is.na(val)) {
       s <- sprintf("%*s", width, "NA")
       return(s)
@@ -325,7 +354,7 @@ table.garch.cli.tse <- function(results, show.signbias = TRUE) {
     } else if (val < 0.05) {
       s <- sprintf("%*.3f", width, val)
       cli::col_red(s)
-    } else if (is_best) {
+    } else if (is_best_val) {
       s <- sprintf("%*.3f", width, val)
       cli::col_green(cli::style_bold(s))
     } else {
@@ -333,15 +362,15 @@ table.garch.cli.tse <- function(results, show.signbias = TRUE) {
     }
   }
   
-  fmt_nyblom <- function(stat, crit, is_best) {
+  fmt_nyblom <- function(stat, crit, is_best_val) {
     if (is.na(stat)) {
       s <- sprintf("%*s", w_nyb, "NA")
       return(s)
     }
     s <- sprintf("%*.2f", w_nyb, stat)
-    if (is_best) {
+    if (is_best_val) {
       cli::col_green(cli::style_bold(s))
-    } else if (stat >= crit) {
+    } else if (!is.na(crit) && stat >= crit) {
       cli::col_red(s)
     } else {
       s
@@ -362,12 +391,12 @@ table.garch.cli.tse <- function(results, show.signbias = TRUE) {
   cli::cli_text("Distribution: {.val {results$distribution}}")
   cli::cli_text("")
   
-  # Build header string
+  # Build header string (consistent order: AIC, AICc, BIC)
   header <- paste0(
     sprintf("%-*s", w_model, "Model"), sep,
     sprintf("%*s", w_ic, "AIC"), sep,
-    sprintf("%*s", w_ic, "BIC"), sep,
     sprintf("%*s", w_ic, "AICc"), sep,
+    sprintf("%*s", w_ic, "BIC"), sep,
     sprintf("%*s", w_wlb, "WLB1"), sep,
     sprintf("%*s", w_wlb, "WLB2"), sep,
     sprintf("%*s", w_wlb, "WLB3"), sep,
@@ -388,17 +417,17 @@ table.garch.cli.tse <- function(results, show.signbias = TRUE) {
     
     row <- paste0(
       fmt_model(r$Model), sep,
-      fmt_ic(r$AIC, i == best$aic), sep,
-      fmt_ic(r$BIC, i == best$bic), sep,
-      fmt_ic(r$AICC, i == best$aicc), sep,
-      fmt_pval(r$WLB1, i == best$wlb1), sep,
-      fmt_pval(r$WLB2, i == best$wlb2), sep,
-      fmt_pval(r$WLB3, i == best$wlb3), sep,
-      fmt_nyblom(r$Nyblom, r$Nyblom_crit, i == best$nyblom)
+      fmt_ic(r$AIC, is_best(i, best$aic)), sep,
+      fmt_ic(r$AICC, is_best(i, best$aicc)), sep,
+      fmt_ic(r$BIC, is_best(i, best$bic)), sep,
+      fmt_pval(r$WLB1, is_best(i, best$wlb1)), sep,
+      fmt_pval(r$WLB2, is_best(i, best$wlb2)), sep,
+      fmt_pval(r$WLB3, is_best(i, best$wlb3)), sep,
+      fmt_nyblom(r$Nyblom, r$Nyblom_crit, is_best(i, best$nyblom))
     )
     
     if (show.signbias) {
-      row <- paste0(row, sep, fmt_pval(r$SignBias, i == best$signbias, width = w_sb))
+      row <- paste0(row, sep, fmt_pval(r$SignBias, is_best(i, best$signbias), width = w_sb))
     }
     row <- paste0(row, sep, fmt_coef(r$n_sig, r$n_coef))
     
@@ -525,11 +554,11 @@ table.coef.gt.tse <- function(fit,
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.sig, weight = "bold"),
-      locations = gt::cells_body(columns = p_display, rows = p_val < 0.05)
+      locations = gt::cells_body(columns = p_display, rows = !is.na(p_val) & p_val < 0.05)
     ) |>
     gt::tab_style(
       style = gt::cell_text(color = color.nonsig),
-      locations = gt::cells_body(columns = p_display, rows = p_val >= 0.05)
+      locations = gt::cells_body(columns = p_display, rows = !is.na(p_val) & p_val >= 0.05)
     ) |>
     gt::tab_source_note("Significance: *** p < 0.001, ** p < 0.01, * p < 0.05, . p < 0.1") |>
     gt::tab_options(

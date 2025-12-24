@@ -13,7 +13,7 @@ gen.aruma.tse(
   lambda = 0,
   innov_gen = NULL,
   plot = TRUE,
-  sn = 0
+  sn = NULL
 )
 }
 \arguments{
@@ -38,13 +38,13 @@ If \code{NULL} (default), uses standard normal innovations.}
 
 \item{plot}{Logical. If \code{TRUE} (default), plot the realization.}
 
-\item{sn}{Integer. Random seed for reproducibility. Default is 0 (no seed).}
+\item{sn}{Integer or NULL. Random seed for reproducibility.
+Default is NULL (no seed set).}
 }
 \value{
 An object of class \code{"aruma"} containing:
 \describe{
 \item{y}{Numeric vector of the generated realization}
-\item{innovations}{Numeric vector of innovations used}
 \item{n, p, q, d, s}{Model orders}
 \item{phi, theta, lambda}{Model parameters}
 \item{plot}{A ggplot object of the realization}

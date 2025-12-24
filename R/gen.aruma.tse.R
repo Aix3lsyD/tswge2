@@ -16,12 +16,12 @@
 #'   \code{function(n)} returning a numeric vector of length n with mean zero.
 #'   If \code{NULL} (default), uses standard normal innovations.
 #' @param plot Logical. If \code{TRUE} (default), plot the realization.
-#' @param sn Integer. Random seed for reproducibility. Default is 0 (no seed).
+#' @param sn Integer or NULL. Random seed for reproducibility. 
+#'   Default is NULL (no seed set).
 #'
 #' @return An object of class \code{"aruma"} containing:
 #'   \describe{
 #'     \item{y}{Numeric vector of the generated realization}
-#'     \item{innovations}{Numeric vector of innovations used}
 #'     \item{n, p, q, d, s}{Model orders}
 #'     \item{phi, theta, lambda}{Model parameters}
 #'     \item{plot}{A ggplot object of the realization}
@@ -31,6 +31,9 @@
 #'   \code{\link{make.gen.norm.tse}}
 #'
 #' @export
+#' @import ggplot2
+#' @importFrom stats arima.sim rnorm
+#' @importFrom utils head
 #'
 #' @examples
 #' # Simple AR(1) with normal innovations
@@ -46,9 +49,9 @@
 #' result <- gen.aruma.tse(n = 500, phi = 0.7, theta = 0.3, d = 1,
 #'                         innov_gen = t_gen, sn = 42)
 gen.aruma.tse <- function(n, phi = 0, theta = 0, d = 0, s = 0, lambda = 0,
-                          innov_gen = NULL, plot = TRUE, sn = 0) {
+                          innov_gen = NULL, plot = TRUE, sn = NULL) {
   # Set seed if provided (before any random generation)
-  if (sn > 0) {
+  if (!is.null(sn)) {
     set.seed(sn)
   }
   
@@ -58,7 +61,6 @@ gen.aruma.tse <- function(n, phi = 0, theta = 0, d = 0, s = 0, lambda = 0,
   }
   
   # Convert parameters for arima.sim
-  
   # arima.sim uses opposite sign convention for MA
   ar <- phi
   ma <- -theta
@@ -85,42 +87,48 @@ gen.aruma.tse <- function(n, phi = 0, theta = 0, d = 0, s = 0, lambda = 0,
   seas <- rep(0, 100)
   if (s > 0) seas[s] <- 1
   
-  # Calculate total length needed
+  # Calculate total length needed and burn-in
+  n.start <- max(100L, 10L * p, 10L * q)
   spin <- 100
   ngen <- n + dlams + spin
   
-  # Generate innovations with buffer for arima.sim burn-in
-  arima_burnin <- 100
-  innovations <- innov_gen(ngen + arima_burnin)
+  # Generate all innovations from custom generator for both burn-in and main series
+  total_innov <- innov_gen(ngen + n.start)
+  start_innov <- total_innov[1:n.start]
+  main_innov <- total_innov[(n.start + 1):(n.start + ngen)]
   
-  # Simulate ARMA process with our custom innovations
-  if ((p > 0) & (q > 0)) {
-    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ar = ar, ma = ma), innov = innovations)
+  # Simulate ARMA process with consistent innovations throughout
+  if ((p > 0) && (q > 0)) {
+    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ar = ar, ma = ma),
+                        innov = main_innov, n.start = n.start, start.innov = start_innov)
   }
-  if ((p == 0) & (q > 0)) {
-    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ma = ma), innov = innovations)
+  if ((p == 0) && (q > 0)) {
+    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ma = ma),
+                        innov = main_innov, n.start = n.start, start.innov = start_innov)
   }
-  if ((p > 0) & (q == 0)) {
-    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ar = ar), innov = innovations)
+  if ((p > 0) && (q == 0)) {
+    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ar = ar),
+                        innov = main_innov, n.start = n.start, start.innov = start_innov)
   }
-  if ((p == 0) & (q == 0)) {
-    tsdata <- arima.sim(n = ngen, model = list(order = c(0, d, 0)), innov = innovations)
+  if ((p == 0) && (q == 0)) {
+    tsdata <- arima.sim(n = ngen, model = list(order = c(0, d, 0)),
+                        innov = main_innov, n.start = n.start, start.innov = start_innov)
   }
   
   # Compute the inverse of the nonstationary operator
   y <- as.numeric(tsdata)
   
-  if ((dlam > 0) & (s > 0)) {
-    temp <- mult.wge(fac1 = lambda, fac2 = seas)
+  if ((dlam > 0) && (s > 0)) {
+    temp <- tswge2::mult.wge(fac1 = lambda, fac2 = seas)
     lambdas <- temp$model.coef
   }
-  if ((dlam > 0) & (s == 0)) {
+  if ((dlam > 0) && (s == 0)) {
     lambdas <- lambda
   }
-  if ((dlam == 0) & (s > 0)) {
+  if ((dlam == 0) && (s > 0)) {
     lambdas <- seas
   }
-  if ((dlam == 0) & (s == 0)) {
+  if ((dlam == 0) && (s == 0)) {
     lambdas <- 0
   }
   
@@ -171,7 +179,6 @@ gen.aruma.tse <- function(n, phi = 0, theta = 0, d = 0, s = 0, lambda = 0,
   # Build result object
   result <- list(
     y = y_final,
-    innovations = innovations[1:n],
     n = n,
     p = p,
     q = q,
