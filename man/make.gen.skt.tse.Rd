@@ -8,17 +8,18 @@ make.gen.skt.tse(df, alpha = 0, scale = FALSE)
 }
 \arguments{
 \item{df}{Degrees of freedom (tail heaviness). Must be > 2 for finite
-variance. Called \code{nu} in some parameterizations.}
+variance when \code{scale = TRUE}. Called \code{nu} in some
+parameterizations.}
 
 \item{alpha}{Slant/skewness parameter. \code{alpha = 0} gives symmetric t.
 Positive values give right skew, negative gives left skew. Default is 0.}
 
 \item{scale}{Logical. If \code{TRUE}, standardize to zero mean and unit
-variance. Default is \code{FALSE}.}
+variance using theoretical moments. Default is \code{FALSE}.}
 }
 \value{
 A function with signature \code{function(n)} that generates
-\code{n} skew-t distributed innovations.
+\code{n} skew-t distributed innovations with mean zero.
 }
 \description{
 Factory function that returns a skew-t distributed innovation generator
@@ -31,6 +32,16 @@ model asset returns that exhibit both heavy tails and asymmetry
 
 When \code{alpha = 0}, the distribution reduces to a symmetric
 Student's t distribution.
+
+\strong{Standardization approach}: When \code{scale = TRUE}, this
+implementation standardizes using \emph{theoretical} mean and variance
+(via \code{sn::st.cumulants}), rather than sample statistics. This
+preserves the iid property of the innovations, which is essential for
+valid time series simulation.
+
+When \code{scale = FALSE} and \code{alpha != 0}, the output is still
+centered to zero mean using the theoretical mean, but variance is not
+standardized.
 }
 \examples{
 # Symmetric heavy-tailed (equivalent to t)
@@ -41,9 +52,13 @@ skt_left <- make.gen.skt.tse(df = 5, alpha = -2)
 innovations <- skt_left(1000)
 hist(innovations, breaks = 50)
 
-# Right-skewed, standardized
+# Right-skewed, standardized to unit variance
 skt_right <- make.gen.skt.tse(df = 5, alpha = 2, scale = TRUE)
+innovations_scaled <- skt_right(1000)
+var(innovations_scaled)  # approximately 1
 }
 \seealso{
 \code{\link[sn]{rst}} for the underlying random generator.
+
+\code{\link[sn]{st.cumulants}} for theoretical cumulants.
 }

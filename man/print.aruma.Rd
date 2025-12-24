@@ -2,18 +2,21 @@
 % Please edit documentation in R/gen.aruma.tse.R
 \name{print.aruma}
 \alias{print.aruma}
-\title{Print Method for aruma Objects}
+\title{Print method for aruma objects}
 \usage{
 \method{print}{aruma}(x, ...)
 }
 \arguments{
-\item{x}{An object of class \code{"aruma"}.}
+\item{x}{An object of class \code{"aruma"} from \code{\link{gen.aruma.tse}}.}
 
-\item{...}{Additional arguments (ignored).}
+\item{...}{Additional arguments passed to print methods (currently ignored).}
 }
 \value{
 Invisibly returns \code{x}.
 }
 \description{
-Print Method for aruma Objects
+Print method for aruma objects
+}
+\seealso{
+\code{\link{gen.aruma.tse}}
 }

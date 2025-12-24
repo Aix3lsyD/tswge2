@@ -2,18 +2,21 @@
 % Please edit documentation in R/gen.aruma.tse.R
 \name{plot.aruma}
 \alias{plot.aruma}
-\title{Plot Method for aruma Objects}
+\title{Plot method for aruma objects}
 \usage{
 \method{plot}{aruma}(x, ...)
 }
 \arguments{
-\item{x}{An object of class \code{"aruma"}.}
+\item{x}{An object of class \code{"aruma"} from \code{\link{gen.aruma.tse}}.}
 
-\item{...}{Additional arguments (ignored).}
+\item{...}{Additional arguments passed to print methods (currently ignored).}
 }
 \value{
-Invisibly returns the ggplot object.
+Invisibly returns the \code{ggplot} object.
 }
 \description{
-Plot Method for aruma Objects
+Plot method for aruma objects
+}
+\seealso{
+\code{\link{gen.aruma.tse}}
 }

@@ -274,7 +274,17 @@ gen.aruma.tse <- function(n, phi = 0, theta = 0, d = 0, s = 0, lambda = 0,
 # S3 Methods
 # ------------------------------------------------------------------------------
 
+#' Print method for aruma objects
+#'
+#' @param x An object of class \code{"aruma"} from \code{\link{gen.aruma.tse}}.
+#' @param ... Additional arguments passed to print methods (currently ignored).
+#'
+#' @return Invisibly returns \code{x}.
+#'
+#' @seealso \code{\link{gen.aruma.tse}}
+#'
 #' @export
+#' @method print aruma
 print.aruma <- function(x, ...) {
   cat("ARUMA Realization\n")
   cat(sprintf("n = %d, p = %d, q = %d, d = %d, s = %d\n",
@@ -291,7 +301,17 @@ print.aruma <- function(x, ...) {
 }
 
 
+#' Plot method for aruma objects
+#'
+#' @param x An object of class \code{"aruma"} from \code{\link{gen.aruma.tse}}.
+#' @param ... Additional arguments passed to print methods (currently ignored).
+#'
+#' @return Invisibly returns the \code{ggplot} object.
+#'
+#' @seealso \code{\link{gen.aruma.tse}}
+#'
 #' @export
+#' @method plot aruma
 plot.aruma <- function(x, ...) {
   print(x$plot)
   invisible(x$plot)

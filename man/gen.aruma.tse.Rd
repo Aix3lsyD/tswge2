@@ -25,11 +25,11 @@ Default is 0 (no AR component).}
 \item{theta}{Numeric vector. MA parameters (ATSA sign convention).
 Default is 0 (no MA component).}
 
-\item{d}{Integer. Order of differencing. Default is 0.}
+\item{d}{Integer. Order of differencing (handled by arima.sim). Default is 0.}
 
-\item{s}{Integer. Order of seasonal differencing. Default is 0.}
+\item{s}{Integer. Seasonal period for seasonal differencing. Default is 0.}
 
-\item{lambda}{Numeric vector. Parameters in nonstationary operator.
+\item{lambda}{Numeric vector. Additional nonstationary factor coefficients.
 Default is 0.}
 
 \item{innov_gen}{Function. Innovation generator with signature
@@ -54,6 +54,23 @@ An object of class \code{"aruma"} containing:
 Generates realizations from ARUMA (ARIMA with possible seasonal and
 nonstationary components) models with custom innovation distributions.
 }
+\details{
+The function generates ARUMA realizations by:
+\enumerate{
+\item Simulating an ARMA(p,q) process with optional differencing via
+\code{arima.sim}
+\item Applying the inverse of any additional nonstationary operators
+(seasonal factor and/or lambda)
+}
+
+Note: \code{arima.sim} with \code{d > 0} returns \code{n + d} values
+(the first \code{d} are prepended zeros from \code{diffinv}). This
+function accounts for that offset when extracting the final series.
+
+Seasonal differencing \code{s} applies the factor \eqn{(1 - B^s)}.
+The \code{lambda} parameter specifies additional nonstationary factor
+coefficients that are multiplied with the seasonal factor.
+}
 \examples{
 # Simple AR(1) with normal innovations
 result <- gen.aruma.tse(n = 200, phi = 0.7, sn = 123)
@@ -67,6 +84,9 @@ result <- gen.aruma.tse(n = 500, phi = 0.7, theta = 0.3,
 t_gen <- make.gen.t.tse(df = 5)
 result <- gen.aruma.tse(n = 500, phi = 0.7, theta = 0.3, d = 1,
                         innov_gen = t_gen, sn = 42)
+
+# Seasonal model with s = 12
+result <- gen.aruma.tse(n = 500, phi = 0.5, s = 12, sn = 42)
 }
 \seealso{
 \code{\link{make.gen.garch.tse}}, \code{\link{make.gen.t.tse}},
