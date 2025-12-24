@@ -8,15 +8,15 @@
 #'   Default is 0 (no AR component).
 #' @param theta Numeric vector. MA parameters (ATSA sign convention).
 #'   Default is 0 (no MA component).
-#' @param d Integer. Order of differencing. Default is 0.
-#' @param s Integer. Order of seasonal differencing. Default is 0.
-#' @param lambda Numeric vector. Parameters in nonstationary operator.
+#' @param d Integer. Order of differencing (handled by arima.sim). Default is 0.
+#' @param s Integer. Seasonal period for seasonal differencing. Default is 0.
+#' @param lambda Numeric vector. Additional nonstationary factor coefficients.
 #'   Default is 0.
 #' @param innov_gen Function. Innovation generator with signature
 #'   \code{function(n)} returning a numeric vector of length n with mean zero.
 #'   If \code{NULL} (default), uses standard normal innovations.
 #' @param plot Logical. If \code{TRUE} (default), plot the realization.
-#' @param sn Integer or NULL. Random seed for reproducibility. 
+#' @param sn Integer or NULL. Random seed for reproducibility.
 #'   Default is NULL (no seed set).
 #'
 #' @return An object of class \code{"aruma"} containing:
@@ -26,6 +26,23 @@
 #'     \item{phi, theta, lambda}{Model parameters}
 #'     \item{plot}{A ggplot object of the realization}
 #'   }
+#'
+#' @details
+#' The function generates ARUMA realizations by:
+#' \enumerate{
+#'   \item Simulating an ARMA(p,q) process with optional differencing via
+#'     \code{arima.sim}
+#'   \item Applying the inverse of any additional nonstationary operators
+#'     (seasonal factor and/or lambda)
+#' }
+#'
+#' Note: \code{arima.sim} with \code{d > 0} returns \code{n + d} values
+#' (the first \code{d} are prepended zeros from \code{diffinv}). This
+#' function accounts for that offset when extracting the final series.
+#'
+#' Seasonal differencing \code{s} applies the factor \eqn{(1 - B^s)}.
+#' The \code{lambda} parameter specifies additional nonstationary factor
+#' coefficients that are multiplied with the seasonal factor.
 #'
 #' @seealso \code{\link{make.gen.garch.tse}}, \code{\link{make.gen.t.tse}},
 #'   \code{\link{make.gen.norm.tse}}
@@ -48,121 +65,136 @@
 #' t_gen <- make.gen.t.tse(df = 5)
 #' result <- gen.aruma.tse(n = 500, phi = 0.7, theta = 0.3, d = 1,
 #'                         innov_gen = t_gen, sn = 42)
+#'
+#' # Seasonal model with s = 12
+#' result <- gen.aruma.tse(n = 500, phi = 0.5, s = 12, sn = 42)
 gen.aruma.tse <- function(n, phi = 0, theta = 0, d = 0, s = 0, lambda = 0,
                           innov_gen = NULL, plot = TRUE, sn = NULL) {
-  # Set seed if provided (before any random generation)
-  if (!is.null(sn)) {
-    set.seed(sn)
-  }
   
-  # Default innovation generator: standard normal
+  # --------------------------------------------------------------------------
+  # Input validation
+  # --------------------------------------------------------------------------
+  
+  if (!is.numeric(n) || length(n) != 1 || n < 1) {
+    stop("n must be a positive integer")
+  }
+  n <- as.integer(n)
+  
+  if (!is.numeric(d) || length(d) != 1 || d < 0) {
+    stop("d must be a non-negative integer")
+  }
+  d <- as.integer(d)
+  
+  if (!is.numeric(s) || length(s) != 1 || s < 0) {
+    stop("s must be a non-negative integer")
+  }
+  s <- as.integer(s)
+  
+  # --------------------------------------------------------------------------
+  # Setup
+  # --------------------------------------------------------------------------
+  
+  if (!is.null(sn)) set.seed(sn)
+  
   if (is.null(innov_gen)) {
-    innov_gen <- function(n) rnorm(n, mean = 0, sd = 1)
+    innov_gen <- function(n) rnorm(n)
   }
   
-  # Convert parameters for arima.sim
-  # arima.sim uses opposite sign convention for MA
-  ar <- phi
-  ma <- -theta
-  p <- length(ar)
-  q <- length(ma)
-  dlam <- length(lambda)
+  # --------------------------------------------------------------------------
+  # Parse ARMA parameters (convert ATSA -> R sign convention for MA)
+  # --------------------------------------------------------------------------
   
-  if (all(ar == 0)) {
-    ar <- NA
-    p <- 0
-  }
-  if (all(ma == 0)) {
-    ma <- NA
-    q <- 0
-  }
-  if (all(lambda == 0)) {
-    lambda <- NA
-    dlam <- 0
-  }
+  p <- if (all(phi == 0)) 0L else length(phi)
+  q <- if (all(theta == 0)) 0L else length(theta)
   
-  # Set up seasonal component
-  dlams <- dlam + s
-  lambdas <- rep(0, 100)
-  seas <- rep(0, 100)
-  if (s > 0) seas[s] <- 1
+  # Build model list for arima.sim
+  model <- list(order = c(p, d, q))
+  if (p > 0) model$ar <- phi
+  if (q > 0) model$ma <- -theta  # ATSA -> R sign convention
   
-  # Calculate total length needed and burn-in
-  n.start <- max(100L, 10L * p, 10L * q)
-  spin <- 100
-  ngen <- n + dlams + spin
+  # --------------------------------------------------------------------------
+  # Parse nonstationary factors: seasonal (1 - B^s) and lambda
+  # These are applied AFTER arima.sim via inverse operator
+  # --------------------------------------------------------------------------
   
-  # Generate all innovations from custom generator for both burn-in and main series
-  total_innov <- innov_gen(ngen + n.start)
-  start_innov <- total_innov[1:n.start]
-  main_innov <- total_innov[(n.start + 1):(n.start + ngen)]
+  has_lambda <- !all(lambda == 0)
+  has_seasonal <- s > 0
   
-  # Simulate ARMA process with consistent innovations throughout
-  if ((p > 0) && (q > 0)) {
-    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ar = ar, ma = ma),
-                        innov = main_innov, n.start = n.start, start.innov = start_innov)
-  }
-  if ((p == 0) && (q > 0)) {
-    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ma = ma),
-                        innov = main_innov, n.start = n.start, start.innov = start_innov)
-  }
-  if ((p > 0) && (q == 0)) {
-    tsdata <- arima.sim(n = ngen, model = list(order = c(p, d, q), ar = ar),
-                        innov = main_innov, n.start = n.start, start.innov = start_innov)
-  }
-  if ((p == 0) && (q == 0)) {
-    tsdata <- arima.sim(n = ngen, model = list(order = c(0, d, 0)),
-                        innov = main_innov, n.start = n.start, start.innov = start_innov)
+  # Build coefficient vector for inverse nonstationary operator
+  # Seasonal factor (1 - B^s) as AR-style coefficients: c(0,...,0,1) length s
+  if (has_lambda && has_seasonal) {
+    seas_coef <- c(rep(0, s - 1), 1)
+    combined <- tswge2::mult.wge(fac1 = lambda, fac2 = seas_coef)
+    ns_coef <- combined$model.coef
+  } else if (has_lambda) {
+    ns_coef <- lambda
+  } else if (has_seasonal) {
+    ns_coef <- c(rep(0, s - 1), 1)
+  } else {
+    ns_coef <- NULL
   }
   
-  # Compute the inverse of the nonstationary operator
+  ns_order <- if (is.null(ns_coef)) 0L else length(ns_coef)
+  
+  # --------------------------------------------------------------------------
+  # Calculate lengths and burn-in periods
+  # --------------------------------------------------------------------------
+  
+  # n_start: burn-in for arima.sim (ARMA stabilization)
+  # Larger for high-order or near-unit-root processes
+  n_start <- max(100L, 10L * p, 10L * q)
+  
+  # spin: additional burn-in for inverse nonstationary operator
+  # Need at least 2 full cycles of the longest nonstationary component
+  spin <- max(100L, 2L * ns_order)
+  
+  # Total length to simulate (this is n for arima.sim, before un-differencing)
+  # arima.sim will return n_sim + d values (d prepended by diffinv)
+  n_sim <- n + ns_order + spin
+  
+  # --------------------------------------------------------------------------
+  # Generate innovations and simulate ARMA/ARIMA
+  # --------------------------------------------------------------------------
+  
+  # Single call to innov_gen preserves dependence structure (important for GARCH)
+  total_innov_needed <- n_sim + n_start
+  all_innov <- innov_gen(total_innov_needed)
+  
+  # arima.sim returns n_sim + d values when d > 0
+  # First d values are prepended zeros from diffinv
+  tsdata <- arima.sim(
+    n = n_sim,
+    model = model,
+    innov = all_innov[(n_start + 1):total_innov_needed],
+    n.start = n_start,
+    start.innov = all_innov[1:n_start]
+  )
+  
   y <- as.numeric(tsdata)
+  # y now has length n_sim + d
   
-  if ((dlam > 0) && (s > 0)) {
-    temp <- tswge2::mult.wge(fac1 = lambda, fac2 = seas)
-    lambdas <- temp$model.coef
-  }
-  if ((dlam > 0) && (s == 0)) {
-    lambdas <- lambda
-  }
-  if ((dlam == 0) && (s > 0)) {
-    lambdas <- seas
-  }
-  if ((dlam == 0) && (s == 0)) {
-    lambdas <- 0
-  }
+  # --------------------------------------------------------------------------
+  # Apply inverse of nonstationary operator (if any)
+  # --------------------------------------------------------------------------
   
-  d1 <- d + dlams + 1
-  nd <- n + d + dlams + 1
-  ndspin <- nd + spin - 1
-  xfull <- rep(0, ndspin)
-  x <- rep(0, ndspin)
-  
-  if (dlams == 0) {
-    for (i in d1:ndspin) {
-      xfull[i] <- y[i]
-    }
+  if (ns_order > 0) {
+    # Apply cumulative recursion: x[t] = y[t] + sum(ns_coef[j] * x[t-j])
+    # Pass d so helper can account for diffinv offset
+    y_final <- .apply_inverse_ns_operator(y, ns_coef, d, spin, n)
+  } else {
+    # No nonstationary factors beyond d (which arima.sim handled)
+    # Account for d prepended values from diffinv
+    start_idx <- d + spin + 1
+    y_final <- y[start_idx:(start_idx + n - 1)]
   }
   
-  if (dlams > 0) {
-    for (i in d1:ndspin) {
-      xfull[i] <- y[i]
-      for (j in 1:dlams) {
-        xfull[i] <- xfull[i] + lambdas[j] * xfull[i - j]
-      }
-    }
-  }
+  # --------------------------------------------------------------------------
+  # Build output
+  # --------------------------------------------------------------------------
   
-  for (ii in 1:n) {
-    x[ii] <- xfull[ii + spin + d1 - 1]
-  }
+  df_plot <- data.frame(time = seq_len(n), y = y_final)
   
-  # Final series
-  y_final <- as.numeric(x[1:n])
-  
-  # Build ggplot object
-  df <- data.frame(time = 1:n, y = y_final)
-  gg <- ggplot2::ggplot(df, ggplot2::aes(x = time, y = y)) +
+  gg <- ggplot2::ggplot(df_plot, ggplot2::aes(x = time, y = y)) +
     ggplot2::geom_line(color = "steelblue", linewidth = 0.5) +
     ggplot2::labs(x = "Time", y = "Value", title = "ARUMA Realization") +
     ggplot2::theme_minimal() +
@@ -171,53 +203,86 @@ gen.aruma.tse <- function(n, phi = 0, theta = 0, d = 0, s = 0, lambda = 0,
       panel.grid.minor = ggplot2::element_blank()
     )
   
-  # Show plot if requested
-  if (plot == TRUE) {
-    print(gg)
-  }
+  if (isTRUE(plot)) print(gg)
   
-  # Build result object
-  result <- list(
-    y = y_final,
-    n = n,
-    p = p,
-    q = q,
-    d = d,
-    s = s,
-    phi = phi,
-    theta = theta,
-    lambda = lambda,
-    plot = gg
+  structure(
+    list(
+      y = y_final,
+      n = n,
+      p = p,
+      q = q,
+      d = d,
+      s = s,
+      phi = phi,
+      theta = theta,
+      lambda = lambda,
+      plot = gg
+    ),
+    class = "aruma"
   )
-  
-  class(result) <- "aruma"
-  
-  return(result)
 }
 
 
-#' Print Method for aruma Objects
-#'
-#' @param x An object of class \code{"aruma"}.
-#' @param ... Additional arguments (ignored).
-#'
-#' @return Invisibly returns \code{x}.
-#'
+# ------------------------------------------------------------------------------
+# Helper: Apply inverse nonstationary operator
+# ------------------------------------------------------------------------------
+#' @noRd
+.apply_inverse_ns_operator <- function(y, ns_coef, d, spin, n) {
+  ns_order <- length(ns_coef)
+  len_y <- length(y)
+  
+  # Expected length: n + ns_order + spin + d (d from diffinv)
+  expected_len <- n + ns_order + spin + d
+  if (len_y != expected_len) {
+    stop(sprintf(
+      "Internal error: y has length %d, expected %d (n=%d, ns_order=%d, spin=%d, d=%d)",
+      len_y, expected_len, n, ns_order, spin, d
+    ))
+  }
+  
+  # Allocate output vector (same length as input)
+  x <- numeric(len_y)
+  
+  # Start recursion after d (diffinv offset) + ns_order (need prior values)
+  start_recursion <- d + ns_order + 1
+  
+  # Apply cumulative sum recursion:
+  # x[t] = y[t] + ns_coef[1]*x[t-1] + ns_coef[2]*x[t-2] + ... + ns_coef[k]*x[t-k]
+  for (i in start_recursion:len_y) {
+    x[i] <- y[i]
+    for (j in seq_len(ns_order)) {
+      x[i] <- x[i] + ns_coef[j] * x[i - j]
+    }
+  }
+  
+  # Extract final n observations after d offset and spin burn-in
+  start_extract <- d + spin + ns_order + 1
+  end_extract <- start_extract + n - 1
+  
+  if (end_extract > len_y) {
+    stop(sprintf(
+      "Internal error: extraction end %d exceeds array length %d",
+      end_extract, len_y
+    ))
+  }
+  
+  x[start_extract:end_extract]
+}
+
+
+# ------------------------------------------------------------------------------
+# S3 Methods
+# ------------------------------------------------------------------------------
+
 #' @export
 print.aruma <- function(x, ...) {
   cat("ARUMA Realization\n")
   cat(sprintf("n = %d, p = %d, q = %d, d = %d, s = %d\n",
               x$n, x$p, x$q, x$d, x$s))
   
-  if (x$p > 0) {
-    cat("phi =", paste(round(x$phi, 4), collapse = ", "), "\n")
-  }
-  if (x$q > 0) {
-    cat("theta =", paste(round(x$theta, 4), collapse = ", "), "\n")
-  }
-  if (!all(is.na(x$lambda))) {
-    cat("lambda =", paste(round(x$lambda, 4), collapse = ", "), "\n")
-  }
+  if (x$p > 0) cat("phi =", paste(round(x$phi, 4), collapse = ", "), "\n")
+  if (x$q > 0) cat("theta =", paste(round(x$theta, 4), collapse = ", "), "\n")
+  if (!all(x$lambda == 0)) cat("lambda =", paste(round(x$lambda, 4), collapse = ", "), "\n")
   
   cat("\nFirst 6 values of y:\n")
   print(utils::head(x$y))
@@ -226,13 +291,6 @@ print.aruma <- function(x, ...) {
 }
 
 
-#' Plot Method for aruma Objects
-#'
-#' @param x An object of class \code{"aruma"}.
-#' @param ... Additional arguments (ignored).
-#'
-#' @return Invisibly returns the ggplot object.
-#'
 #' @export
 plot.aruma <- function(x, ...) {
   print(x$plot)
