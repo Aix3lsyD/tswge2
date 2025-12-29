@@ -1,0 +1,375 @@
+---
+title: "Woodward-Bottone-Gray Bootstrap Test for Trend"
+author: "TSE Package Vignette"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+ fig.height = 5
+)
+```
+
+## Introduction
+Testing for linear trend in time series data is challenging when residuals are autocorrelated. Standard regression-based tests assume independent errors, leading to inflated Type I error rates when this assumption is violated.
+Woodward, Bottone, and Gray (1997) proposed a bootstrap procedure that accounts for autocorrelation by:
+
+1. Fitting an AR model to the data under the null hypothesis (no trend)
+2. Generating bootstrap samples from this AR model
+3. Computing the test statistic on each bootstrap sample
+4. Comparing the observed statistic to the empirical null distribution
+
+This vignette demonstrates the `wbg.boot.test.tse()` function using the same global temperature data analyzed in the original paper.
+
+## Setup
+
+```{r load-packages}
+#library(tswge)
+#library(tse)  # Your package
+
+# Set seed for reproducibility
+set.seed(42)
+```
+
+## The NASA GISS Temperature Data
+
+The original paper analyzed global temperature anomalies from Hansen and Lebedeff (1987, 1988). We'll use the modern GISTEMP v4 dataset from NASA GISS, which continues this work. The data represents deviations from the 1951-1980 baseline mean.
+
+```{r load-data}
+# Download NASA GISS Global Temperature Anomaly Data
+# Source: https://data.giss.nasa.gov/gistemp/
+url <- "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv"
+
+# Read the CSV (skip the title row)
+giss_data <- read.csv(url, skip = 1, na.strings = "***")
+
+# Extract Year and J-D (January-December annual mean)
+annual_data <- data.frame(
+  year = giss_data$Year,
+  anomaly = giss_data$J.D
+)
+
+# Remove any rows with missing annual means
+annual_data <- annual_data[!is.na(annual_data$anomaly), ]
+
+# Filter to 1880-1987 to match the original paper
+temp_1880_1987 <- annual_data[annual_data$year >= 1880 & annual_data$year <= 1987, ]
+temp_anomaly <- temp_1880_1987$anomaly
+years <- temp_1880_1987$year
+n <- length(temp_anomaly)
+
+cat("Series length:", n, "years\n")
+cat("Period:", min(years), "-", max(years), "\n")
+cat("Data source: NASA GISS GISTEMP v4\n")
+```
+
+```{r plot-data, fig.cap="Global Temperature Anomaly Series (1880-1987)"}
+plot(years, temp_anomaly, type = "l", lwd = 2, col = "darkblue",
+     xlab = "Year", ylab = "Temperature Anomaly (°C)",
+     main = "NASA GISS Global Temperature Anomaly (1880-1987)")
+grid()
+
+# Add OLS trend line
+fit_ols <- lm(temp_anomaly ~ years)
+abline(fit_ols, col = "red", lwd = 2, lty = 2)
+legend("topleft", legend = c("Temperature Anomaly", "OLS Trend"),
+       col = c("darkblue", "red"), lwd = 2, lty = c(1, 2))
+
+cat("\nOLS slope estimate:", round(coef(fit_ols)[2], 5), "°C/year\n")
+cat("OLS t-statistic:", round(summary(fit_ols)$coefficients[2, 3], 3), "\n")
+cat("OLS p-value:", format(summary(fit_ols)$coefficients[2, 4], scientific = TRUE), "\n")
+```
+
+The naive OLS analysis suggests a highly significant trend. But can we trust this when the residuals are autocorrelated?
+
+## Examining Autocorrelation
+
+```{r acf-analysis, fig.cap="ACF of Temperature Residuals"}
+residuals_ols <- residuals(fit_ols)
+
+par(mfrow = c(1, 2))
+acf(residuals_ols, main = "ACF of OLS Residuals", lag.max = 20)
+pacf(residuals_ols, main = "PACF of OLS Residuals", lag.max = 20)
+par(mfrow = c(1, 1))
+```
+
+The ACF shows significant autocorrelation in the residuals, violating the OLS assumption of independence. Let's fit an AR model to characterize the dependence structure.
+
+```{r ar-fit}
+# Fit AR model to the series (under H0: no trend)
+ar_fit <- aic.burg.wge(temp_anomaly, p = 1:10)
+
+cat("Selected AR order:", ar_fit$p, "\n")
+cat("AR coefficients:\n")
+print(round(ar_fit$phi, 4))
+
+# Compute phi(1) = 1 - sum(phi) - measures "distance from unit root"
+phi_one <- 1 - sum(ar_fit$phi)
+cat("\nphi(1) = 1 - sum(phi) =", round(phi_one, 4), "\n")
+cat("(Values close to 0 indicate strong persistence)\n")
+```
+
+## Running the WBG Bootstrap Test
+
+Now we apply the bootstrap test using different test statistics.
+
+### Using Cochrane-Orcutt Statistic
+
+This is the statistic used in the original paper.
+
+```{r wbg-co}
+# Create the CO statistic function
+co_stat <- make.stat.co.tse(maxp = 5)
+
+# Run the bootstrap test
+result_co <- wbg.boot.test.tse(
+  x = temp_anomaly,
+  stat_fn = co_stat,
+  nb = 999,
+  p_max = 8,
+  bootadj = TRUE,
+  seed = 123
+)
+
+cat("=== Cochrane-Orcutt Results ===\n\n")
+cat("Observed t-statistic:", round(result_co$obs_stat, 3), "\n")
+cat("AR order selected:", result_co$ar_order, "\n\n")
+
+cat("--- COB (Basic Bootstrap) ---\n")
+cat("Two-sided p-value:", round(result_co$pvalue_two, 4), "\n")
+cat("Upper one-sided p-value:", round(result_co$pvalue_upper, 4), "\n\n")
+
+cat("--- COBA (Variance-Adjusted) ---\n")
+cat("Adjustment factor C:", round(result_co$adj_factor, 4), "\n")
+cat("Adjusted t-statistic:", round(result_co$obs_stat_adj, 3), "\n")
+cat("Two-sided p-value (adj):", round(result_co$pvalue_two_adj, 4), "\n")
+cat("Upper one-sided p-value (adj):", round(result_co$pvalue_upper_adj, 4), "\n")
+```
+
+### Visualizing the Bootstrap Distribution
+
+```{r plot-bootstrap-co, fig.cap="Bootstrap Distribution of CO t-statistic"}
+hist(result_co$boot_dist, breaks = 40, col = "lightblue", border = "white",
+     main = "Bootstrap Distribution Under H0 (Cochrane-Orcutt)",
+     xlab = "t-statistic", probability = TRUE)
+
+# Add density curve
+lines(density(result_co$boot_dist), col = "blue", lwd = 2)
+
+# Add observed statistic
+abline(v = result_co$obs_stat, col = "red", lwd = 2, lty = 1)
+abline(v = result_co$obs_stat_adj, col = "darkred", lwd = 2, lty = 2)
+
+# Add critical values (two-sided 5%)
+crit_lower <- quantile(result_co$boot_dist, 0.025)
+crit_upper <- quantile(result_co$boot_dist, 0.975)
+abline(v = c(crit_lower, crit_upper), col = "darkgray", lwd = 2, lty = 3)
+
+legend("topright",
+       legend = c("Bootstrap Dist", "Observed t", "Adjusted t", "95% Critical"),
+       col = c("blue", "red", "darkred", "darkgray"),
+       lwd = 2, lty = c(1, 1, 2, 3))
+```
+
+### Comparing Multiple Statistics
+
+Let's compare several test statistics on the same data.
+
+```{r compare-stats}
+# Define statistic functions
+stats_list <- list(
+  "Cochrane-Orcutt" = make.stat.co.tse(maxp = 5),
+  "OLS t-stat" = make.stat.ols.t.tse(),
+  "Bloomfield-Nychka" = make.stat.bn.tse(),
+  "Spearman" = make.stat.spearman.tse(),
+  "Mann-Kendall" = make.stat.mk.tse()
+)
+
+# Run tests
+results_all <- list()
+for (name in names(stats_list)) {
+  cat("Running:", name, "...\n")
+  results_all[[name]] <- wbg.boot.test.tse(
+    x = temp_anomaly,
+    stat_fn = stats_list[[name]],
+    nb = 999,
+    p_max = 8,
+    bootadj = TRUE,
+    seed = 456
+  )
+}
+```
+
+```{r results-table}
+# Create comparison table
+comparison <- data.frame(
+  Statistic = names(results_all),
+  Observed = sapply(results_all, function(r) round(r$obs_stat, 3)),
+  P_COB = sapply(results_all, function(r) round(r$pvalue_two, 4)),
+  Adj_Factor = sapply(results_all, function(r) round(r$adj_factor, 3)),
+  Observed_Adj = sapply(results_all, function(r) round(r$obs_stat_adj, 3)),
+  P_COBA = sapply(results_all, function(r) round(r$pvalue_two_adj, 4)),
+  row.names = NULL
+)
+
+knitr::kable(comparison,
+             col.names = c("Statistic", "Observed", "p (COB)",
+                           "Adj Factor", "Obs (Adj)", "p (COBA)"),
+             caption = "Comparison of Test Statistics for Temperature Trend")
+```
+
+## Interpretation
+
+### Comparison with Original Paper
+
+The original Woodward, Bottone, and Gray (1997) paper found:
+
+| Result | Paper | Our Implementation |
+|--------|-------|-------------------|
+| CO t-statistic | 2.73 | `r round(result_co$obs_stat, 2)` |
+| Bootstrap 95% critical | 4.50 | `r round(quantile(result_co$boot_dist, 0.95), 2)` |
+| COB p-value (one-sided) | 14.3% | `r round(result_co$pvalue_upper * 100, 1)`% |
+| COBA p-value (one-sided) | 22.3% | `r round(result_co$pvalue_upper_adj * 100, 1)`% |
+
+### Key Findings
+
+1. **OLS is misleading**: The naive OLS test gives a highly significant p-value, but this ignores autocorrelation.
+
+2. **Bootstrap corrects for dependence**: The bootstrap procedure accounts for the AR structure, producing much wider confidence intervals.
+
+3. **COBA provides additional correction**: The adjustment factor `r round(result_co$adj_factor, 3)` scales the observed statistic to account for bias in AR parameter estimates.
+
+4. **No significant trend detected**: At α = 0.05, none of the bootstrap-based tests find a significant trend in the temperature data through 1987.
+
+## Simulation Study: Type I Error
+
+Let's verify that the test maintains appropriate significance levels under the null.
+
+```{r sim-type1, cache=TRUE}
+# Simulate from AR model fit to temperature data (no trend)
+n_sims <- 200
+n_obs <- length(temp_anomaly)
+ar_phi <- ar_fit$phi
+
+# Storage for results
+reject_cob <- 0
+reject_coba <- 0
+
+cat("Running", n_sims, "simulations under H0...\n")
+
+for (i in 1:n_sims) {
+  # Generate data under null
+  x_sim <- gen.arma.wge(n_obs, phi = ar_phi, plot = FALSE)
+
+  # Run test
+  res <- wbg.boot.test.tse(
+    x = x_sim,
+    stat_fn = make.stat.ols.t.tse(),
+    nb = 199,
+    p_max = 8,
+    bootadj = TRUE,
+    seed = 0
+  )
+
+  # Count rejections at alpha = 0.05 (two-sided)
+  if (res$pvalue_two <= 0.05) reject_cob <- reject_cob + 1
+  if (res$pvalue_two_adj <= 0.05) reject_coba <- reject_coba + 1
+
+  if (i %% 50 == 0) cat("Completed", i, "simulations\n")
+}
+
+cat("\n=== Type I Error Results ===\n")
+cat("Nominal level: 5%\n")
+cat("COB rejection rate:", round(100 * reject_cob / n_sims, 1), "%\n")
+cat("COBA rejection rate:", round(100 * reject_coba / n_sims, 1), "%\n")
+```
+
+## Conclusion
+
+The WBG bootstrap test provides a principled approach to testing for trend in autocorrelated time series. Key advantages:
+- **Accounts for dependence**: By fitting an AR model and generating bootstrap samples that preserve the correlation structure
+- **Flexible**: Works with any test statistic via the `stat_fn` parameter
+- **Variance correction**: The COBA adjustment corrects for bias in AR parameter estimation, especially important when autocorrelation is strong
+
+For the global temperature data through 1987, while there is a visible upward tendency, the bootstrap test does not find it statistically significant when properly accounting for the strong autocorrelation in the residuals.
+
+## Bonus: Analyzing the Full Modern Record (1880-Present)
+
+What happens if we use all available data through the present?
+
+```{r modern-analysis}
+# Use full dataset
+temp_modern <- annual_data[annual_data$year >= 1880, ]
+temp_full <- temp_modern$anomaly
+years_full <- temp_modern$year
+n_full <- length(temp_full)
+
+cat("Full series length:", n_full, "years\n")
+cat("Period:", min(years_full), "-", max(years_full), "\n")
+```
+
+```{r plot-modern, fig.cap="Global Temperature Anomaly (Full Record)"}
+plot(years_full, temp_full, type = "l", lwd = 2, col = "darkblue",
+     xlab = "Year", ylab = "Temperature Anomaly (°C)",
+     main = "NASA GISS Global Temperature Anomaly (1880-Present)")
+grid()
+
+fit_full <- lm(temp_full ~ years_full)
+abline(fit_full, col = "red", lwd = 2, lty = 2)
+
+# Mark 1987 cutoff
+abline(v = 1987, col = "gray", lty = 3, lwd = 2)
+text(1987, min(temp_full), "1987", pos = 4, col = "gray40")
+
+legend("topleft", legend = c("Temperature Anomaly", "OLS Trend", "Paper Cutoff"),
+       col = c("darkblue", "red", "gray"), lwd = 2, lty = c(1, 2, 3))
+```
+
+```{r test-modern}
+# Run WBG test on full record
+result_modern <- wbg.boot.test.tse(
+  x = temp_full,
+  stat_fn = make.stat.co.tse(maxp = 5),
+  nb = 999,
+  p_max = 8,
+  bootadj = TRUE,
+  seed = 789
+)
+
+cat("=== Results for Full Record (1880-Present) ===\n\n")
+cat("Observed t-statistic:", round(result_modern$obs_stat, 3), "\n")
+cat("AR order:", result_modern$ar_order, "\n\n")
+
+cat("COB two-sided p-value:", round(result_modern$pvalue_two, 4), "\n")
+cat("COBA two-sided p-value:", round(result_modern$pvalue_two_adj, 4), "\n")
+```
+
+With the full modern record, the warming trend is now statistically significant even after accounting for autocorrelation. The additional ~35+ years of data—including the pronounced warming since the late 1970s—provides sufficient evidence to reject the null hypothesis of no trend.
+
+This illustrates an important point: the lack of significance in 1987 wasn't necessarily evidence against global warming, but rather reflected the difficulty of detecting a trend signal in the presence of strong autocorrelation with limited data.
+
+## References
+
+Woodward, W. A., Bottone, S., and Gray, H. L. (1997). Improved tests for trend in time series data. *Journal of Agricultural, Biological, and Environmental Statistics*, 2(4), 403-416.
+
+Hansen, J., and Lebedeff, S. (1987). Global trends of measured surface air temperature. *Journal of Geophysical Research*, 92, 13345-13372.
+
+GISTEMP Team (2025). GISS Surface Temperature Analysis (GISTEMP), version 4. NASA Goddard Institute for Space Studies. Dataset accessed at https://data.giss.nasa.gov/gistemp/.
+
+Lenssen, N., G.A. Schmidt, M. Hendrickson, P. Jacobs, M. Menne, and R. Ruedy (2024). A GISTEMPv4 observational uncertainty ensemble. *J. Geophys. Res. Atmos.*, 129(17), e2023JD040179.
+
+## Session Info
+
+```{r session-info}
+sessionInfo()
+```

@@ -31,7 +31,11 @@ Imports:
     rugarch,
     WeightedPortTest,
     gt,
-    cli
+    cli,
+    nlme,
+    sandwich, 
+    lmtest,
+    Kendall
 Suggests: 
     patchwork,
     knitr,

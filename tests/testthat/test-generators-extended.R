@@ -205,19 +205,3 @@ test_that("make.gen.garch.tse works with t-distribution", {
   expect_length(x, 500)
   expect_true(all(is.finite(x)))
 })
-
-test_that("make.gen.garch.tse works with GJR-GARCH model", {
-  skip_if_not_installed("rugarch")
-  # Note: GJR-GARCH requires gamma (leverage) parameters which are not
-  # currently exposed in make.gen.garch.tse(). Skip until implementation
-  # supports asymmetric GARCH variants with gamma parameter.
-  skip("GJR-GARCH requires gamma parameter not yet supported")
-  
-  gen <- make.gen.garch.tse(
-    omega = 0.1, alpha = 0.05, beta = 0.9,
-    model = "gjrGARCH"
-  )
-  x <- gen(500)
-  expect_length(x, 500)
-  expect_true(all(is.finite(x)))
-})
