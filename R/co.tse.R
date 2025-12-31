@@ -6,6 +6,8 @@
 #'
 #' @param x A numeric vector containing the time series data.
 #' @param maxp Maximum AR order for AIC selection. Default is 5.
+#' 
+#' @importFrom stats resid lm
 #'
 #' @return A list containing:
 #'   \item{x}{The original time series.}

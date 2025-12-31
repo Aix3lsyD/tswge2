@@ -11,6 +11,8 @@ wbg.boot.test.tse(
   p_max = 5,
   bootadj = TRUE,
   seed = 0,
+  boot_seeds = NULL,
+  boot_seeds_adj = NULL,
   parallel = FALSE,
   num_cpu = 1,
   verbose = TRUE
@@ -20,8 +22,8 @@ wbg.boot.test.tse(
 \item{x}{Numeric vector. The observed time series.}
 
 \item{stat_fn}{Function. A function that takes a numeric vector and returns
-a single numeric test statistic. Use the \code{make.stat.*.tse} generator
-functions to create appropriate statistic functions.}
+a single numeric test statistic. Use \code{\link{make.stat.co.tse}} or
+create your own following the signature \code{function(x) -> numeric(1)}.}
 
 \item{nb}{Integer. Number of bootstrap replicates. Default is 399.}
 
@@ -32,7 +34,16 @@ model. Order is selected by AIC. Default is 5.}
 Default is TRUE.}
 
 \item{seed}{Integer. Random seed for reproducibility. If 0 (default), no
-seed is set.}
+seed is set. Used to generate \code{boot_seeds} if not provided.}
+
+\item{boot_seeds}{Optional numeric vector of seeds for each bootstrap
+replication. If provided, must be of length \code{nb}. If \code{NULL}
+(default), seeds are auto-generated (after \code{seed} is set, if provided).
+Enables identical results in sequential and parallel modes.}
+
+\item{boot_seeds_adj}{Optional numeric vector of seeds for COBA adjustment
+bootstrap. If \code{NULL} (default), auto-generated. Ignored if
+\code{bootadj = FALSE}.}
 
 \item{parallel}{Logical. If TRUE, use parallel processing. Default is FALSE.}
 
@@ -42,11 +53,52 @@ Set to 0 to use all available cores.}
 \item{verbose}{Logical. If TRUE, display progress. Default is TRUE.}
 }
 \value{
-A list containing test results including observed statistic,
-bootstrap distribution, p-values, and (if bootadj=TRUE) adjusted values.
+A list containing:
+\item{obs_stat}{Observed test statistic.}
+\item{boot_dist}{Vector of bootstrap test statistics.}
+\item{pvalue_two}{Two-sided bootstrap p-value.}
+\item{pvalue_upper}{Upper one-sided p-value (H1: stat > 0).}
+\item{pvalue_lower}{Lower one-sided p-value (H1: stat < 0).}
+\item{ar_order}{AR order selected for null model.}
+\item{ar_phi}{AR coefficients for null model.}
+\item{n}{Length of input series.}
+\item{nb}{Number of bootstrap replicates.}
+\item{boot_seeds}{Seeds used for bootstrap (for reproducibility).}
+\item{obs_stat_adj}{(If bootadj) Adjusted observed statistic.}
+\item{boot_dist_adj}{(If bootadj) Adjustment bootstrap distribution.}
+\item{pvalue_two_adj}{(If bootadj) Adjusted two-sided p-value.}
+\item{pvalue_upper_adj}{(If bootadj) Adjusted upper p-value.}
+\item{pvalue_lower_adj}{(If bootadj) Adjusted lower p-value.}
+\item{adj_factor}{(If bootadj) Variance adjustment factor.}
+\item{median_phi}{(If bootadj) AR coefficients of median model.}
+\item{boot_seeds_adj}{(If bootadj) Seeds used for adjustment bootstrap.}
 }
 \description{
 Performs a bootstrap hypothesis test for trend in a time series while
 accounting for autocorrelation. Under the null hypothesis, the series
 is assumed to be a stationary AR process with no trend.
+}
+\examples{
+\dontrun{
+# Basic usage
+stat_fn <- make.stat.co.tse(maxp = 5)
+result <- wbg.boot.test.tse(x, stat_fn, nb = 399)
+
+# Reproduce exact results (even in parallel)
+result2 <- wbg.boot.test.tse(x, stat_fn, nb = 399, 
+                              boot_seeds = result$boot_seeds,
+                              boot_seeds_adj = result$boot_seeds_adj,
+                              parallel = TRUE, num_cpu = 4)
+identical(result$pvalue_two, result2$pvalue_two)  # TRUE
+}
+
+}
+\references{
+Woodward, W. A., Bottone, S., and Gray, H. L. (1997). "Improved Tests for
+Trend in Time Series Data." \emph{Journal of Agricultural, Biological, and
+Environmental Statistics}, 2(4), 403-416.
+}
+\seealso{
+\code{\link{make.stat.co.tse}}, \code{\link{co.tse}},
+\code{\link{wbg.boot.tse}}
 }

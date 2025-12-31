@@ -3,6 +3,9 @@
 #' Performs a bootstrap hypothesis test for trend in a time series while
 #' accounting for autocorrelation. Under the null hypothesis, the series
 #' is assumed to be a stationary AR process with no trend.
+#' 
+#' @importFrom stats sd
+#' @importFrom utils txtProgressBar setTxtProgressBar
 #'
 #' @param x Numeric vector. The observed time series.
 #' @param stat_fn Function. A function that takes a numeric vector and returns

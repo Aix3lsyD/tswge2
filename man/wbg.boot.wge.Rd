@@ -2,12 +2,13 @@
 \alias{wbg.boot.wge}
 \title{Woodward-Bottone-Gray test for trend}
 \description{Performs the Woodward-Bottone-Gray (WBG) bootstrap-based test for a linear trend in a time series realization.)}
-\usage{wbg.boot.wge(x,nb=399,alpha=.05,pvalue=TRUE,sn=0)}
+\usage{wbg.boot.wge(x,nb=399,alpha=.05,pvalue=TRUE,maxp=5,sn=0)}
 \arguments{
   \item{x}{Realization}
   \item{nb}{The number of Bootstrap replications (default is 399)}
   \item{alpha}{The significance level of the test (default is .05)}
   \item{pvalue}{Logical variable. TRUE(default) prints out the p-value of the test.}
+  \item{maxp}{Maximum AR order for AIC selection in the Cochrane-Orcutt procedure. Default is 5.}
   \item{sn}{Sets the seed for the simulations (default = 0))}
 }
 \value{
