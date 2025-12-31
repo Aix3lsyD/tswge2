@@ -20,7 +20,7 @@
 #' @export
 make.stat.co.tse <- function(maxp = 5) {
   function(x) {
-    co.wge(x, maxp = maxp)$tco
+    co.tse(x, maxp = maxp)$tco
   }
 }
 

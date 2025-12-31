@@ -1,375 +1,368 @@
 ---
-title: "Woodward-Bottone-Gray Bootstrap Test for Trend"
-author: "TSE Package Vignette"
-date: "`r Sys.Date()`"
-output:
-  html_document:
-    toc: true
-    toc_float: true
-    theme: flatly
-    code_folding: show
+title: "Verification: TSE Function Suite"
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(
-  echo = TRUE,
-  message = FALSE,
-  warning = FALSE,
-  fig.width = 8,
- fig.height = 5
-)
+knitr::opts_chunk$set(echo = TRUE)
+#library(tswge)  # or your package name
 ```
 
-## Introduction
-Testing for linear trend in time series data is challenging when residuals are autocorrelated. Standard regression-based tests assume independent errors, leading to inflated Type I error rates when this assumption is violated.
-Woodward, Bottone, and Gray (1997) proposed a bootstrap procedure that accounts for autocorrelation by:
+## Overview
 
-1. Fitting an AR model to the data under the null hypothesis (no trend)
-2. Generating bootstrap samples from this AR model
-3. Computing the test statistic on each bootstrap sample
-4. Comparing the observed statistic to the empirical null distribution
+This document verifies that the refactored functions produce results consistent 
+with the original implementations.
 
-This vignette demonstrates the `wbg.boot.test.tse()` function using the same global temperature data analyzed in the original paper.
+**Part 1:** Verify `co.tse()` and `wbg.boot.tse()` match originals  
+**Part 2:** Verify `wbg.boot.test.tse()` (parallel) matches `wbg.boot.tse()`
 
-## Setup
+---
 
-```{r load-packages}
-#library(tswge)
-#library(tse)  # Your package
+# Part 1: Verify co.tse and wbg.boot.tse
 
-# Set seed for reproducibility
+## 1. Verify co.wge() and co.tse() produce identical results
+
+The Cochrane-Orcutt functions are deterministic (no random component), so they 
+should produce exactly identical results.
+
+```{r co-comparison}
+# Generate test data
 set.seed(42)
-```
+x_test = gen.arma.wge(100, phi = c(0.9), plot = FALSE, sn = 42)
 
-## The NASA GISS Temperature Data
+# Run both functions
+result_old = co.wge(x_test, maxp = 5)
+result_new = co.tse(x_test, maxp = 5)
 
-The original paper analyzed global temperature anomalies from Hansen and Lebedeff (1987, 1988). We'll use the modern GISTEMP v4 dataset from NASA GISS, which continues this work. The data represents deviations from the 1951-1980 baseline mean.
+# Compare all outputs
+cat("=== Cochrane-Orcutt Comparison ===\n\n")
 
-```{r load-data}
-# Download NASA GISS Global Temperature Anomaly Data
-# Source: https://data.giss.nasa.gov/gistemp/
-url <- "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv"
+cat("b0hat match:", all.equal(result_old$b0hat, result_new$b0hat), "\n")
+cat("b1hat match:", all.equal(result_old$b1hat, result_new$b1hat), "\n")
+cat("z.order match:", result_old$z.order == result_new$z.order, "\n")
+cat("z.phi match:", all.equal(result_old$z.phi, result_new$z.phi), "\n")
+cat("pvalue match:", all.equal(result_old$pvalue, result_new$pvalue), "\n")
+cat("tco match:", all.equal(result_old$tco, result_new$tco), "\n")
+cat("z.x match:", all.equal(result_old$z.x, result_new$z.x), "\n")
 
-# Read the CSV (skip the title row)
-giss_data <- read.csv(url, skip = 1, na.strings = "***")
+# Overall check
+all_match = all(
 
-# Extract Year and J-D (January-December annual mean)
-annual_data <- data.frame(
-  year = giss_data$Year,
-  anomaly = giss_data$J.D
+  all.equal(result_old$b0hat, result_new$b0hat) == TRUE,
+  all.equal(result_old$b1hat, result_new$b1hat) == TRUE,
+  result_old$z.order == result_new$z.order,
+  all.equal(result_old$z.phi, result_new$z.phi) == TRUE,
+  all.equal(result_old$pvalue, result_new$pvalue) == TRUE,
+  all.equal(result_old$tco, result_new$tco) == TRUE
 )
 
-# Remove any rows with missing annual means
-annual_data <- annual_data[!is.na(annual_data$anomaly), ]
-
-# Filter to 1880-1987 to match the original paper
-temp_1880_1987 <- annual_data[annual_data$year >= 1880 & annual_data$year <= 1987, ]
-temp_anomaly <- temp_1880_1987$anomaly
-years <- temp_1880_1987$year
-n <- length(temp_anomaly)
-
-cat("Series length:", n, "years\n")
-cat("Period:", min(years), "-", max(years), "\n")
-cat("Data source: NASA GISS GISTEMP v4\n")
+cat("\n*** ALL CO OUTPUTS MATCH:", all_match, "***\n")
 ```
 
-```{r plot-data, fig.cap="Global Temperature Anomaly Series (1880-1987)"}
-plot(years, temp_anomaly, type = "l", lwd = 2, col = "darkblue",
-     xlab = "Year", ylab = "Temperature Anomaly (°C)",
-     main = "NASA GISS Global Temperature Anomaly (1880-1987)")
-grid()
+## 2. Verify wbg.boot.wge() and wbg.boot.tse() consistency
 
-# Add OLS trend line
-fit_ols <- lm(temp_anomaly ~ years)
-abline(fit_ols, col = "red", lwd = 2, lty = 2)
-legend("topleft", legend = c("Temperature Anomaly", "OLS Trend"),
-       col = c("darkblue", "red"), lwd = 2, lty = c(1, 2))
+The new function has an improved seeding mechanism with per-iteration seeds for 
+better reproducibility. To verify identical results with the old function, use
+`legacy_seed = TRUE` which reverts to the original approach.
 
-cat("\nOLS slope estimate:", round(coef(fit_ols)[2], 5), "°C/year\n")
-cat("OLS t-statistic:", round(summary(fit_ols)$coefficients[2, 3], 3), "\n")
-cat("OLS p-value:", format(summary(fit_ols)$coefficients[2, 4], scientific = TRUE), "\n")
-```
+### 2a. Verify identical results with legacy_seed = TRUE
 
-The naive OLS analysis suggests a highly significant trend. But can we trust this when the residuals are autocorrelated?
+```{r boot-comparison, cache=TRUE}
+# Use same test data
+nb_test = 99  # smaller for speed
 
-## Examining Autocorrelation
+# Run both with same sn - use legacy_seed for identical comparison
+result_boot_old = wbg.boot.wge(x_test, nb = nb_test, maxp = 5, sn = 123)
+result_boot_new = wbg.boot.tse(x_test, nb = nb_test, maxp = 5, sn = 123, 
+                               legacy_seed = TRUE)
 
-```{r acf-analysis, fig.cap="ACF of Temperature Residuals"}
-residuals_ols <- residuals(fit_ols)
+cat("=== Bootstrap Comparison (legacy_seed = TRUE) ===\n\n")
 
-par(mfrow = c(1, 2))
-acf(residuals_ols, main = "ACF of OLS Residuals", lag.max = 20)
-pacf(residuals_ols, main = "PACF of OLS Residuals", lag.max = 20)
-par(mfrow = c(1, 1))
-```
+cat("Old (wbg.boot.wge):\n")
+cat("  AR order (p):", result_boot_old$p, "\n")
+cat("  phi:", result_boot_old$phi, "\n")
+cat("  p-value:", result_boot_old$pv, "\n\n")
 
-The ACF shows significant autocorrelation in the residuals, violating the OLS assumption of independence. Let's fit an AR model to characterize the dependence structure.
+cat("New (wbg.boot.tse):\n")
+cat("  AR order (p):", result_boot_new$p, "\n")
+cat("  phi:", result_boot_new$phi, "\n")
+cat("  t-statistic:", result_boot_new$tco, "\n")
+cat("  p-value:", result_boot_new$pv, "\n\n")
 
-```{r ar-fit}
-# Fit AR model to the series (under H0: no trend)
-ar_fit <- aic.burg.wge(temp_anomaly, p = 1:10)
+# All should match exactly
+cat("--- Comparison ---\n")
+cat("AR order (p) match:", result_boot_old$p == result_boot_new$p, "\n")
+cat("phi match:", all.equal(result_boot_old$phi, result_boot_new$phi), "\n")
+cat("p-value match:", all.equal(result_boot_old$pv, result_boot_new$pv), "\n")
 
-cat("Selected AR order:", ar_fit$p, "\n")
-cat("AR coefficients:\n")
-print(round(ar_fit$phi, 4))
-
-# Compute phi(1) = 1 - sum(phi) - measures "distance from unit root"
-phi_one <- 1 - sum(ar_fit$phi)
-cat("\nphi(1) = 1 - sum(phi) =", round(phi_one, 4), "\n")
-cat("(Values close to 0 indicate strong persistence)\n")
-```
-
-## Running the WBG Bootstrap Test
-
-Now we apply the bootstrap test using different test statistics.
-
-### Using Cochrane-Orcutt Statistic
-
-This is the statistic used in the original paper.
-
-```{r wbg-co}
-# Create the CO statistic function
-co_stat <- make.stat.co.tse(maxp = 5)
-
-# Run the bootstrap test
-result_co <- wbg.boot.test.tse(
-  x = temp_anomaly,
-  stat_fn = co_stat,
-  nb = 999,
-  p_max = 8,
-  bootadj = TRUE,
-  seed = 123
+boot_match = all(
+  result_boot_old$p == result_boot_new$p,
+  isTRUE(all.equal(result_boot_old$phi, result_boot_new$phi)),
+  isTRUE(all.equal(result_boot_old$pv, result_boot_new$pv))
 )
 
-cat("=== Cochrane-Orcutt Results ===\n\n")
-cat("Observed t-statistic:", round(result_co$obs_stat, 3), "\n")
-cat("AR order selected:", result_co$ar_order, "\n\n")
-
-cat("--- COB (Basic Bootstrap) ---\n")
-cat("Two-sided p-value:", round(result_co$pvalue_two, 4), "\n")
-cat("Upper one-sided p-value:", round(result_co$pvalue_upper, 4), "\n\n")
-
-cat("--- COBA (Variance-Adjusted) ---\n")
-cat("Adjustment factor C:", round(result_co$adj_factor, 4), "\n")
-cat("Adjusted t-statistic:", round(result_co$obs_stat_adj, 3), "\n")
-cat("Two-sided p-value (adj):", round(result_co$pvalue_two_adj, 4), "\n")
-cat("Upper one-sided p-value (adj):", round(result_co$pvalue_upper_adj, 4), "\n")
+cat("\n*** ALL BOOTSTRAP OUTPUTS MATCH:", boot_match, "***\n")
 ```
 
-### Visualizing the Bootstrap Distribution
+### 2b. Confirm modern mode produces different (but valid) results
 
-```{r plot-bootstrap-co, fig.cap="Bootstrap Distribution of CO t-statistic"}
-hist(result_co$boot_dist, breaks = 40, col = "lightblue", border = "white",
-     main = "Bootstrap Distribution Under H0 (Cochrane-Orcutt)",
-     xlab = "t-statistic", probability = TRUE)
+```{r boot-modern-mode}
+cat("=== Modern vs Legacy Seeding ===\n\n")
 
-# Add density curve
-lines(density(result_co$boot_dist), col = "blue", lwd = 2)
+# Same sn, but modern mode (default)
+result_modern = wbg.boot.tse(x_test, nb = nb_test, maxp = 5, sn = 123, 
+                             legacy_seed = FALSE)
 
-# Add observed statistic
-abline(v = result_co$obs_stat, col = "red", lwd = 2, lty = 1)
-abline(v = result_co$obs_stat_adj, col = "darkred", lwd = 2, lty = 2)
-
-# Add critical values (two-sided 5%)
-crit_lower <- quantile(result_co$boot_dist, 0.025)
-crit_upper <- quantile(result_co$boot_dist, 0.975)
-abline(v = c(crit_lower, crit_upper), col = "darkgray", lwd = 2, lty = 3)
-
-legend("topright",
-       legend = c("Bootstrap Dist", "Observed t", "Adjusted t", "95% Critical"),
-       col = c("blue", "red", "darkred", "darkgray"),
-       lwd = 2, lty = c(1, 1, 2, 3))
+cat("Legacy mode p-value:", result_boot_new$pv, "\n")
+cat("Modern mode p-value:", result_modern$pv, "\n")
+cat("P-values differ (expected):", result_boot_new$pv != result_modern$pv, "\n")
+cat("Modern mode returns boot_seeds:", !is.null(result_modern$boot_seeds), "\n")
+cat("Legacy mode returns boot_seeds:", !is.null(result_boot_new$boot_seeds), "\n")
 ```
 
-### Comparing Multiple Statistics
+### 2c. Verify wbg.boot.tse() reproducibility via boot_seeds
 
-Let's compare several test statistics on the same data.
+```{r boot-reproducibility}
+cat("=== wbg.boot.tse Reproducibility ===\n\n")
 
-```{r compare-stats}
-# Define statistic functions
-stats_list <- list(
-  "Cochrane-Orcutt" = make.stat.co.tse(maxp = 5),
-  "OLS t-stat" = make.stat.ols.t.tse(),
-  "Bloomfield-Nychka" = make.stat.bn.tse(),
-  "Spearman" = make.stat.spearman.tse(),
-  "Mann-Kendall" = make.stat.mk.tse()
-)
+# Run once and capture seeds
+run1 = wbg.boot.tse(x_test, nb = nb_test, maxp = 5, sn = 456)
 
-# Run tests
-results_all <- list()
-for (name in names(stats_list)) {
-  cat("Running:", name, "...\n")
-  results_all[[name]] <- wbg.boot.test.tse(
-    x = temp_anomaly,
-    stat_fn = stats_list[[name]],
-    nb = 999,
-    p_max = 8,
-    bootadj = TRUE,
-    seed = 456
-  )
+# Reproduce using returned boot_seeds
+run2 = wbg.boot.tse(x_test, nb = nb_test, maxp = 5, boot_seeds = run1$boot_seeds)
+
+cat("p-value run1:", run1$pv, "\n")
+cat("p-value run2:", run2$pv, "\n")
+cat("t-statistic run1:", run1$tco, "\n")
+cat("t-statistic run2:", run2$tco, "\n")
+
+cat("\n*** REPRODUCIBLE VIA boot_seeds:", 
+    identical(run1$pv, run2$pv) && identical(run1$tco, run2$tco), "***\n")
+```
+
+### 2d. Verify boot_seeds length validation
+
+```{r boot-validation, error=TRUE}
+cat("=== boot_seeds Validation ===\n\n")
+
+# This should error - wrong length
+tryCatch({
+  bad_result = wbg.boot.tse(x_test, nb = 99, boot_seeds = 1:50)
+  cat("ERROR: Should have thrown an error!\n")
+}, error = function(e) {
+  cat("Correctly caught error:\n")
+  cat(conditionMessage(e), "\n")
+})
+```
+
+## Summary
+
+```{r summary}
+cat("=====================================\n")
+cat("VERIFICATION SUMMARY\n")
+cat("=====================================\n\n")
+
+cat("1. co.tse() matches co.wge():
+", all_match, "\n")
+cat("2. wbg.boot.tse(legacy_seed=TRUE) matches wbg.boot.wge(): ", boot_match, "\n")
+cat("3. wbg.boot.tse() reproducible via boot_seeds: ", 
+    identical(run1$pv, run2$pv), "\n")
+
+all_passed = all(all_match, boot_match, identical(run1$pv, run2$pv))
+cat("\n*** ALL TESTS PASSED:", all_passed, "***\n")
+```
+
+---
+
+# Part 2: Verify wbg.boot.tse vs wbg.boot.test.tse (Parallel)
+
+This section verifies that the new parallel-capable `wbg.boot.test.tse()` produces
+results consistent with `wbg.boot.tse()`.
+
+## Key Differences to Account For
+
+| Aspect | wbg.boot.tse() | wbg.boot.test.tse() |
+|--------|----------------|---------------------|
+| Statistic | Hardcoded CO t-stat | Flexible via `stat_fn` |
+| P-value | `mean(abs(boot) >= abs(obs))` | `(sum(...) + 1)/(nb + 1)` |
+| COBA | Not implemented | Available via `bootadj` |
+| Parallel | No | Yes |
+
+## 3. Create matching stat_fn
+
+The `stat_fn` must return the same statistic that `wbg.boot.tse()` uses internally
+(the Cochrane-Orcutt t-statistic). Use the helper function `make.stat.co.tse()`.
+
+```{r stat-fn}
+# Create stat_fn using helper (or inline)
+stat_fn <- make.stat.co.tse(maxp = 5)
+
+# Verify it matches direct co.tse call
+cat("Test stat_fn output:", stat_fn(x_test), "\n")
+cat("Direct co.tse output:", co.tse(x_test, maxp = 5)$tco, "\n")
+cat("Match:", stat_fn(x_test) == co.tse(x_test, maxp = 5)$tco, "\n")
+```
+
+## 4. Compare Bootstrap Distributions
+
+Both functions should produce identical bootstrap distributions when using
+legacy seeding mode.
+
+```{r parallel-bootstrap-comparison, cache=FALSE}
+# Run wbg.boot.tse with legacy seeding
+result_tse <- wbg.boot.tse(x_test, nb = nb_test, maxp = 5, sn = 123,
+                           legacy_seed = TRUE)
+
+# Run wbg.boot.test.tse (sequential, no COBA for direct comparison)
+result_parallel_fn <- wbg.boot.test.tse(x_test, stat_fn = stat_fn, nb = nb_test, 
+                                         p_max = 5, bootadj = FALSE, seed = 123,
+                                         parallel = FALSE, verbose = FALSE)
+
+cat("=== Observed Statistic ===\n")
+cat("wbg.boot.tse tco:", result_tse$tco, "\n")
+cat("wbg.boot.test.tse obs_stat:", result_parallel_fn$obs_stat, "\n")
+obs_stat_match <- isTRUE(all.equal(result_tse$tco, result_parallel_fn$obs_stat))
+cat("Match:", obs_stat_match, "\n\n")
+
+cat("=== AR Model (Null) ===\n")
+cat("wbg.boot.tse p:", result_tse$p, "\n")
+cat("wbg.boot.test.tse ar_order:", result_parallel_fn$ar_order, "\n")
+ar_order_match <- result_tse$p == result_parallel_fn$ar_order
+phi_match <- isTRUE(all.equal(result_tse$phi, result_parallel_fn$ar_phi))
+cat("Order match:", ar_order_match, "\n")
+cat("Phi match:", phi_match, "\n\n")
+
+cat("=== Bootstrap Distribution ===\n")
+cat("First 10 from wbg.boot.tse:\n")
+print(head(result_tse$boot_dist, 10))
+cat("\nFirst 10 from wbg.boot.test.tse:\n")
+print(head(result_parallel_fn$boot_dist, 10))
+
+boot_dist_match_parallel <- isTRUE(all.equal(result_tse$boot_dist, 
+                                              result_parallel_fn$boot_dist))
+cat("\nBootstrap distributions match:", boot_dist_match_parallel, "\n")
+```
+
+## 5. Compare P-values
+
+P-values differ slightly due to different formulas.
+
+```{r pvalue-comparison-parallel}
+cat("=== P-value Comparison ===\n\n")
+
+cat("wbg.boot.tse p-value:", result_tse$pv, "\n")
+cat("wbg.boot.test.tse p-value (two-sided):", result_parallel_fn$pvalue_two, "\n\n")
+
+# Compute both formulas on same data
+pv_old_formula <- mean(abs(result_tse$boot_dist) >= abs(result_tse$tco))
+pv_new_formula <- (sum(abs(result_tse$boot_dist) >= abs(result_tse$tco)) + 1) / (nb_test + 1)
+
+cat("Using same bootstrap distribution:\n")
+cat("  Old formula (mean):", pv_old_formula, "\n")
+cat("  New formula (+1 correction):", pv_new_formula, "\n\n")
+
+cat("The +1 correction prevents p-value = 0 and is statistically preferred.\n")
+```
+
+## 6. Test Parallel Mode
+
+With `boot_seeds`, parallel mode should produce **identical** results to sequential.
+
+```{r parallel-mode-test, cache=TRUE}
+cat("=== Parallel vs Sequential (same boot_seeds) ===\n\n")
+
+n_cores <- parallel::detectCores()
+if (n_cores > 1) {
+  # Run sequential
+  result_seq <- wbg.boot.test.tse(x_test, stat_fn = stat_fn, nb = nb_test,
+                                   p_max = 5, bootadj = FALSE, seed = 123,
+                                   parallel = FALSE, verbose = FALSE)
+  
+  # Run parallel with SAME boot_seeds
+  result_par <- wbg.boot.test.tse(x_test, stat_fn = stat_fn, nb = nb_test,
+                                   p_max = 5, bootadj = FALSE,
+                                   boot_seeds = result_seq$boot_seeds,
+                                   parallel = TRUE, num_cpu = 2, verbose = FALSE)
+  
+  cat("Sequential obs_stat:", result_seq$obs_stat, "\n")
+  cat("Parallel obs_stat:", result_par$obs_stat, "\n")
+  cat("Observed stat match:", all.equal(result_seq$obs_stat, result_par$obs_stat), "\n\n")
+  
+  cat("Sequential p-value:", result_seq$pvalue_two, "\n")
+  cat("Parallel p-value:", result_par$pvalue_two, "\n")
+  pvalue_match <- isTRUE(all.equal(result_seq$pvalue_two, result_par$pvalue_two))
+  cat("P-value match:", pvalue_match, "\n\n")
+  
+  cat("Bootstrap distributions match:", 
+      isTRUE(all.equal(result_seq$boot_dist, result_par$boot_dist)), "\n")
+  
+  parallel_identical <- pvalue_match
+  parallel_ran <- TRUE
+} else {
+  cat("Skipping parallel test - only 1 core available\n")
+  parallel_ran <- FALSE
+  parallel_identical <- NA
 }
 ```
 
-```{r results-table}
-# Create comparison table
-comparison <- data.frame(
-  Statistic = names(results_all),
-  Observed = sapply(results_all, function(r) round(r$obs_stat, 3)),
-  P_COB = sapply(results_all, function(r) round(r$pvalue_two, 4)),
-  Adj_Factor = sapply(results_all, function(r) round(r$adj_factor, 3)),
-  Observed_Adj = sapply(results_all, function(r) round(r$obs_stat_adj, 3)),
-  P_COBA = sapply(results_all, function(r) round(r$pvalue_two_adj, 4)),
-  row.names = NULL
-)
+## 7. Test COBA Adjustment Reproducibility
 
-knitr::kable(comparison,
-             col.names = c("Statistic", "Observed", "p (COB)",
-                           "Adj Factor", "Obs (Adj)", "p (COBA)"),
-             caption = "Comparison of Test Statistics for Temperature Trend")
+```{r coba-test, cache=TRUE}
+cat("=== COBA Adjustment Test ===\n\n")
+
+# Run with COBA enabled
+result_coba <- wbg.boot.test.tse(x_test, stat_fn = stat_fn, nb = nb_test,
+                                  p_max = 5, bootadj = TRUE, seed = 456,
+                                  parallel = FALSE, verbose = FALSE)
+
+cat("Observed stat:", result_coba$obs_stat, "\n")
+cat("Adjusted stat:", result_coba$obs_stat_adj, "\n")
+cat("Adjustment factor:", result_coba$adj_factor, "\n\n")
+
+cat("P-value (unadjusted):", result_coba$pvalue_two, "\n")
+cat("P-value (COBA adjusted):", result_coba$pvalue_two_adj, "\n\n")
+
+# Reproduce using returned seeds
+result_coba2 <- wbg.boot.test.tse(x_test, stat_fn = stat_fn, nb = nb_test,
+                                   p_max = 5, bootadj = TRUE,
+                                   boot_seeds = result_coba$boot_seeds,
+                                   boot_seeds_adj = result_coba$boot_seeds_adj,
+                                   parallel = FALSE, verbose = FALSE)
+
+coba_reproducible <- isTRUE(all.equal(result_coba$pvalue_two_adj, 
+                                       result_coba2$pvalue_two_adj))
+cat("COBA reproducible via seeds:", coba_reproducible, "\n")
 ```
 
-## Interpretation
+## Final Summary
 
-### Comparison with Original Paper
+```{r final-summary}
+cat("=========================================\n")
+cat("COMPLETE VERIFICATION SUMMARY\n")
+cat("=========================================\n\n")
 
-The original Woodward, Bottone, and Gray (1997) paper found:
+cat("--- Part 1: co.tse and wbg.boot.tse ---\n")
+cat("1. co.tse() matches co.wge():", all_match, "\n")
+cat("2. wbg.boot.tse(legacy_seed=TRUE) matches wbg.boot.wge():", boot_match, "\n")
+cat("3. wbg.boot.tse() reproducible via boot_seeds:", identical(run1$pv, run2$pv), "\n\n")
 
-| Result | Paper | Our Implementation |
-|--------|-------|-------------------|
-| CO t-statistic | 2.73 | `r round(result_co$obs_stat, 2)` |
-| Bootstrap 95% critical | 4.50 | `r round(quantile(result_co$boot_dist, 0.95), 2)` |
-| COB p-value (one-sided) | 14.3% | `r round(result_co$pvalue_upper * 100, 1)`% |
-| COBA p-value (one-sided) | 22.3% | `r round(result_co$pvalue_upper_adj * 100, 1)`% |
+cat("--- Part 2: wbg.boot.test.tse (parallel) ---\n")
+cat("4. Observed t-statistic match:", obs_stat_match, "\n")
+cat("5. AR null model match:", ar_order_match && phi_match, "\n")
+cat("6. Bootstrap distributions match:", boot_dist_match_parallel, "\n")
+cat("7. P-value formulas differ by design (+1 correction)\n")
+if (parallel_ran) {
+  cat("8. Parallel == Sequential (same boot_seeds):", parallel_identical, "\n")
+}
+cat("9. COBA reproducible via seeds:", coba_reproducible, "\n")
 
-### Key Findings
-
-1. **OLS is misleading**: The naive OLS test gives a highly significant p-value, but this ignores autocorrelation.
-
-2. **Bootstrap corrects for dependence**: The bootstrap procedure accounts for the AR structure, producing much wider confidence intervals.
-
-3. **COBA provides additional correction**: The adjustment factor `r round(result_co$adj_factor, 3)` scales the observed statistic to account for bias in AR parameter estimates.
-
-4. **No significant trend detected**: At α = 0.05, none of the bootstrap-based tests find a significant trend in the temperature data through 1987.
-
-## Simulation Study: Type I Error
-
-Let's verify that the test maintains appropriate significance levels under the null.
-
-```{r sim-type1, cache=TRUE}
-# Simulate from AR model fit to temperature data (no trend)
-n_sims <- 200
-n_obs <- length(temp_anomaly)
-ar_phi <- ar_fit$phi
-
-# Storage for results
-reject_cob <- 0
-reject_coba <- 0
-
-cat("Running", n_sims, "simulations under H0...\n")
-
-for (i in 1:n_sims) {
-  # Generate data under null
-  x_sim <- gen.arma.wge(n_obs, phi = ar_phi, plot = FALSE)
-
-  # Run test
-  res <- wbg.boot.test.tse(
-    x = x_sim,
-    stat_fn = make.stat.ols.t.tse(),
-    nb = 199,
-    p_max = 8,
-    bootadj = TRUE,
-    seed = 0
-  )
-
-  # Count rejections at alpha = 0.05 (two-sided)
-  if (res$pvalue_two <= 0.05) reject_cob <- reject_cob + 1
-  if (res$pvalue_two_adj <= 0.05) reject_coba <- reject_coba + 1
-
-  if (i %% 50 == 0) cat("Completed", i, "simulations\n")
+cat("\n")
+all_verified <- all(all_match, boot_match, identical(run1$pv, run2$pv),
+                    obs_stat_match, ar_order_match, phi_match, 
+                    boot_dist_match_parallel, coba_reproducible)
+if (parallel_ran && !is.na(parallel_identical)) {
+  all_verified <- all_verified && parallel_identical
 }
 
-cat("\n=== Type I Error Results ===\n")
-cat("Nominal level: 5%\n")
-cat("COB rejection rate:", round(100 * reject_cob / n_sims, 1), "%\n")
-cat("COBA rejection rate:", round(100 * reject_coba / n_sims, 1), "%\n")
-```
-
-## Conclusion
-
-The WBG bootstrap test provides a principled approach to testing for trend in autocorrelated time series. Key advantages:
-- **Accounts for dependence**: By fitting an AR model and generating bootstrap samples that preserve the correlation structure
-- **Flexible**: Works with any test statistic via the `stat_fn` parameter
-- **Variance correction**: The COBA adjustment corrects for bias in AR parameter estimation, especially important when autocorrelation is strong
-
-For the global temperature data through 1987, while there is a visible upward tendency, the bootstrap test does not find it statistically significant when properly accounting for the strong autocorrelation in the residuals.
-
-## Bonus: Analyzing the Full Modern Record (1880-Present)
-
-What happens if we use all available data through the present?
-
-```{r modern-analysis}
-# Use full dataset
-temp_modern <- annual_data[annual_data$year >= 1880, ]
-temp_full <- temp_modern$anomaly
-years_full <- temp_modern$year
-n_full <- length(temp_full)
-
-cat("Full series length:", n_full, "years\n")
-cat("Period:", min(years_full), "-", max(years_full), "\n")
-```
-
-```{r plot-modern, fig.cap="Global Temperature Anomaly (Full Record)"}
-plot(years_full, temp_full, type = "l", lwd = 2, col = "darkblue",
-     xlab = "Year", ylab = "Temperature Anomaly (°C)",
-     main = "NASA GISS Global Temperature Anomaly (1880-Present)")
-grid()
-
-fit_full <- lm(temp_full ~ years_full)
-abline(fit_full, col = "red", lwd = 2, lty = 2)
-
-# Mark 1987 cutoff
-abline(v = 1987, col = "gray", lty = 3, lwd = 2)
-text(1987, min(temp_full), "1987", pos = 4, col = "gray40")
-
-legend("topleft", legend = c("Temperature Anomaly", "OLS Trend", "Paper Cutoff"),
-       col = c("darkblue", "red", "gray"), lwd = 2, lty = c(1, 2, 3))
-```
-
-```{r test-modern}
-# Run WBG test on full record
-result_modern <- wbg.boot.test.tse(
-  x = temp_full,
-  stat_fn = make.stat.co.tse(maxp = 5),
-  nb = 999,
-  p_max = 8,
-  bootadj = TRUE,
-  seed = 789
-)
-
-cat("=== Results for Full Record (1880-Present) ===\n\n")
-cat("Observed t-statistic:", round(result_modern$obs_stat, 3), "\n")
-cat("AR order:", result_modern$ar_order, "\n\n")
-
-cat("COB two-sided p-value:", round(result_modern$pvalue_two, 4), "\n")
-cat("COBA two-sided p-value:", round(result_modern$pvalue_two_adj, 4), "\n")
-```
-
-With the full modern record, the warming trend is now statistically significant even after accounting for autocorrelation. The additional ~35+ years of data—including the pronounced warming since the late 1970s—provides sufficient evidence to reject the null hypothesis of no trend.
-
-This illustrates an important point: the lack of significance in 1987 wasn't necessarily evidence against global warming, but rather reflected the difficulty of detecting a trend signal in the presence of strong autocorrelation with limited data.
-
-## References
-
-Woodward, W. A., Bottone, S., and Gray, H. L. (1997). Improved tests for trend in time series data. *Journal of Agricultural, Biological, and Environmental Statistics*, 2(4), 403-416.
-
-Hansen, J., and Lebedeff, S. (1987). Global trends of measured surface air temperature. *Journal of Geophysical Research*, 92, 13345-13372.
-
-GISTEMP Team (2025). GISS Surface Temperature Analysis (GISTEMP), version 4. NASA Goddard Institute for Space Studies. Dataset accessed at https://data.giss.nasa.gov/gistemp/.
-
-Lenssen, N., G.A. Schmidt, M. Hendrickson, P. Jacobs, M. Menne, and R. Ruedy (2024). A GISTEMPv4 observational uncertainty ensemble. *J. Geophys. Res. Atmos.*, 129(17), e2023JD040179.
-
-## Session Info
-
-```{r session-info}
-sessionInfo()
+cat("*** ALL VERIFICATIONS PASSED:", all_verified, "***\n")
 ```

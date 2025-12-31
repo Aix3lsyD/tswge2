@@ -35,7 +35,8 @@ Imports:
     nlme,
     sandwich, 
     lmtest,
-    Kendall
+    Kendall,
+    pbapply
 Suggests: 
     patchwork,
     knitr,
