@@ -11,7 +11,7 @@ test_that("wbg.boot.test.tse returns correct structure without adjustment", {
   expect_type(result, "list")
   expect_named(result, c(
     "obs_stat", "boot_dist", "pvalue_two", "pvalue_upper",
-    "pvalue_lower", "ar_order", "ar_phi", "n", "nb", "boot_seeds"
+    "pvalue_lower", "ar_order", "ar_phi", "ar_method", "n", "nb", "boot_seeds"
   ))
 })
 
@@ -295,13 +295,13 @@ test_that("parallel mode with COBA produces identical results with same seeds", 
   
   # Run sequential first
   result_seq <- wbg.boot.test.tse(x, stat_fn = stat_fn, nb = 19, bootadj = TRUE,
-                                  seed = 42, parallel = FALSE, verbose = FALSE)
+                                  seed = 42, parallel = FALSE, verbose = FALSE, ar_method = "burg")
   
   # Run parallel with same boot_seeds
   result_par <- wbg.boot.test.tse(x, stat_fn = stat_fn, nb = 19, bootadj = TRUE,
                                   boot_seeds = result_seq$boot_seeds,
                                   boot_seeds_adj = result_seq$boot_seeds_adj,
-                                  parallel = TRUE, num_cpu = 2, verbose = FALSE)
+                                  parallel = TRUE, num_cpu = 2, verbose = FALSE, ar_method = "burg")
   
   expect_equal(result_seq$boot_dist, result_par$boot_dist)
   expect_equal(result_seq$boot_dist_adj, result_par$boot_dist_adj)
