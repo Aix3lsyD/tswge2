@@ -1,29 +1,38 @@
 ---
-title: "Verification: TSE Function Suite"
-output: html_document
+title: "Verification: TSE WGB Function Test"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-#library(tswge)  # or your package name
+knitr::opts_chunk$set(echo = TRUE, results = 'hold')
+#library(tswge2)  # or your package name
 ```
 
 ## Overview
 
-This document verifies that the refactored functions produce results consistent 
-with the original implementations.
+This document verifies that the refactored functions produce results
+consistent with the original implementations.
 
-**Part 1:** Verify `co.tse()` and `wbg.boot.tse()` match originals  
-**Part 2:** Verify `wbg.boot.test.tse()` (parallel) matches `wbg.boot.tse()`
+**Part 1:** Verify `co.tse()` and `wbg.boot.tse()` match originals\
+**Part 2:** Verify `wbg.boot.test.tse()` (parallel) matches
+`wbg.boot.tse()`
 
----
+------------------------------------------------------------------------
 
 # Part 1: Verify co.tse and wbg.boot.tse
 
 ## 1. Verify co.wge() and co.tse() produce identical results
 
-The Cochrane-Orcutt functions are deterministic (no random component), so they 
-should produce exactly identical results.
+Minor refactor of co.wge(), just verifying it works the same...
 
 ```{r co-comparison}
 # Generate test data
@@ -32,7 +41,7 @@ x_test = gen.arma.wge(100, phi = c(0.9), plot = FALSE, sn = 42)
 
 # Run both functions
 result_old = co.wge(x_test, maxp = 5)
-result_new = co.tse(x_test, maxp = 5)
+result_new = co.tse(x_test, maxp = 5, ar_method = "burg")
 
 # Compare all outputs
 cat("=== Cochrane-Orcutt Comparison ===\n\n")
@@ -61,9 +70,16 @@ cat("\n*** ALL CO OUTPUTS MATCH:", all_match, "***\n")
 
 ## 2. Verify wbg.boot.wge() and wbg.boot.tse() consistency
 
-The new function has an improved seeding mechanism with per-iteration seeds for 
-better reproducibility. To verify identical results with the old function, use
-`legacy_seed = TRUE` which reverts to the original approach.
+The end goal was to write a flexible function that could do the WGB
+boostrap test with any statistic and also in parallel. To do so, and
+verify consistent results, needed to take a few steps.
+
+1.  Keep the original wbg.boot.wge() logic, but modify to handle passing
+    in our own seeds.
+2.  To this effect, wrote wbg.boot.tse() and verified it produces the
+    same results as wbg.boot.wge().
+3.  Once quality is established, use it to compare to a parallel
+    implementation.
 
 ### 2a. Verify identical results with legacy_seed = TRUE
 
@@ -74,7 +90,7 @@ nb_test = 99  # smaller for speed
 # Run both with same sn - use legacy_seed for identical comparison
 result_boot_old = wbg.boot.wge(x_test, nb = nb_test, maxp = 5, sn = 123)
 result_boot_new = wbg.boot.tse(x_test, nb = nb_test, maxp = 5, sn = 123, 
-                               legacy_seed = TRUE)
+                               legacy_seed = TRUE, ar_method = "burg")
 
 cat("=== Bootstrap Comparison (legacy_seed = TRUE) ===\n\n")
 
@@ -106,12 +122,15 @@ cat("\n*** ALL BOOTSTRAP OUTPUTS MATCH:", boot_match, "***\n")
 
 ### 2b. Confirm modern mode produces different (but valid) results
 
+Modern and legacy mode won't produce the same results because of seed
+differences, but they should be close.
+
 ```{r boot-modern-mode}
 cat("=== Modern vs Legacy Seeding ===\n\n")
 
 # Same sn, but modern mode (default)
 result_modern = wbg.boot.tse(x_test, nb = nb_test, maxp = 5, sn = 123, 
-                             legacy_seed = FALSE)
+                             legacy_seed = FALSE, ar_method = "burg")
 
 cat("Legacy mode p-value:", result_boot_new$pv, "\n")
 cat("Modern mode p-value:", result_modern$pv, "\n")
@@ -121,6 +140,9 @@ cat("Legacy mode returns boot_seeds:", !is.null(result_boot_new$boot_seeds), "\n
 ```
 
 ### 2c. Verify wbg.boot.tse() reproducibility via boot_seeds
+
+Verify that we can reproduce runs if given boot_seeds from a previous
+run.
 
 ```{r boot-reproducibility}
 cat("=== wbg.boot.tse Reproducibility ===\n\n")
@@ -142,6 +164,8 @@ cat("\n*** REPRODUCIBLE VIA boot_seeds:",
 
 ### 2d. Verify boot_seeds length validation
 
+Function will fail if boot_seeds is not the same length.
+
 ```{r boot-validation, error=TRUE}
 cat("=== boot_seeds Validation ===\n\n")
 
@@ -155,43 +179,33 @@ tryCatch({
 })
 ```
 
-## Summary
-
-```{r summary}
-cat("=====================================\n")
-cat("VERIFICATION SUMMARY\n")
-cat("=====================================\n\n")
-
-cat("1. co.tse() matches co.wge():
-", all_match, "\n")
-cat("2. wbg.boot.tse(legacy_seed=TRUE) matches wbg.boot.wge(): ", boot_match, "\n")
-cat("3. wbg.boot.tse() reproducible via boot_seeds: ", 
-    identical(run1$pv, run2$pv), "\n")
-
-all_passed = all(all_match, boot_match, identical(run1$pv, run2$pv))
-cat("\n*** ALL TESTS PASSED:", all_passed, "***\n")
-```
-
----
+------------------------------------------------------------------------
 
 # Part 2: Verify wbg.boot.tse vs wbg.boot.test.tse (Parallel)
 
-This section verifies that the new parallel-capable `wbg.boot.test.tse()` produces
-results consistent with `wbg.boot.tse()`.
+This section verifies that the new parallel-capable
+`wbg.boot.test.tse()` produces results consistent with `wbg.boot.tse()`.
+
+The wbg.boot.test.tse() function can now be tested against the
+wbg.boot.tse(). Notable differences below, but largely they are passing
+in a function that generates a statistic to bootstrap, an adjust to
+p-value calculation such that it can never be 0, and attempting the
+bootstrap adjustment. More work to verify that code later in simulation
+studies.
 
 ## Key Differences to Account For
 
-| Aspect | wbg.boot.tse() | wbg.boot.test.tse() |
-|--------|----------------|---------------------|
-| Statistic | Hardcoded CO t-stat | Flexible via `stat_fn` |
-| P-value | `mean(abs(boot) >= abs(obs))` | `(sum(...) + 1)/(nb + 1)` |
-| COBA | Not implemented | Available via `bootadj` |
-| Parallel | No | Yes |
+| Aspect    | wbg.boot.tse()                | wbg.boot.test.tse()       |
+|-----------|-------------------------------|---------------------------|
+| Statistic | Hardcoded CO t-stat           | Flexible via `stat_fn`    |
+| P-value   | `mean(abs(boot) >= abs(obs))` | `(sum(...) + 1)/(nb + 1)` |
+| COBA      | Not implemented               | Available via `bootadj`   |
+| Parallel  | No                            | Yes                       |
 
 ## 3. Create matching stat_fn
 
-The `stat_fn` must return the same statistic that `wbg.boot.tse()` uses internally
-(the Cochrane-Orcutt t-statistic). Use the helper function `make.stat.co.tse()`.
+Many different stat generators in stat.generators.tse.R. All in the form
+make.stat.\*.tse. Others need to be tested for validity.
 
 ```{r stat-fn}
 # Create stat_fn using helper (or inline)
@@ -205,17 +219,20 @@ cat("Match:", stat_fn(x_test) == co.tse(x_test, maxp = 5)$tco, "\n")
 
 ## 4. Compare Bootstrap Distributions
 
-Both functions should produce identical bootstrap distributions when using
-legacy seeding mode.
+Both functions should produce identical bootstrap distributions when
+using the same `boot_seeds`.
 
-```{r parallel-bootstrap-comparison, cache=FALSE}
-# Run wbg.boot.tse with legacy seeding
-result_tse <- wbg.boot.tse(x_test, nb = nb_test, maxp = 5, sn = 123,
-                           legacy_seed = TRUE)
+New function without parallel mode mode matches the "old" equivalent
+function.
 
-# Run wbg.boot.test.tse (sequential, no COBA for direct comparison)
+```{r parallel-bootstrap-comparison, cache=TRUE}
+# Run wbg.boot.tse (non-legacy mode to get boot_seeds)
+result_tse <- wbg.boot.tse(x_test, nb = nb_test, maxp = 5, sn = 123)
+
+# Run wbg.boot.test.tse with SAME boot_seeds
 result_parallel_fn <- wbg.boot.test.tse(x_test, stat_fn = stat_fn, nb = nb_test, 
-                                         p_max = 5, bootadj = FALSE, seed = 123,
+                                         p_max = 5, bootadj = FALSE,
+                                         boot_seeds = result_tse$boot_seeds,
                                          parallel = FALSE, verbose = FALSE)
 
 cat("=== Observed Statistic ===\n")
@@ -238,14 +255,15 @@ print(head(result_tse$boot_dist, 10))
 cat("\nFirst 10 from wbg.boot.test.tse:\n")
 print(head(result_parallel_fn$boot_dist, 10))
 
-boot_dist_match_parallel <- isTRUE(all.equal(result_tse$boot_dist, 
-                                              result_parallel_fn$boot_dist))
-cat("\nBootstrap distributions match:", boot_dist_match_parallel, "\n")
+boot_dist_match <- isTRUE(all.equal(result_tse$boot_dist, 
+                                     result_parallel_fn$boot_dist))
+cat("\nBootstrap distributions match:", boot_dist_match, "\n")
 ```
 
 ## 5. Compare P-values
 
-P-values differ slightly due to different formulas.
+P-values differ slightly due to different formulas (+1 correction in new
+function).
 
 ```{r pvalue-comparison-parallel}
 cat("=== P-value Comparison ===\n\n")
@@ -253,20 +271,23 @@ cat("=== P-value Comparison ===\n\n")
 cat("wbg.boot.tse p-value:", result_tse$pv, "\n")
 cat("wbg.boot.test.tse p-value (two-sided):", result_parallel_fn$pvalue_two, "\n\n")
 
-# Compute both formulas on same data
+# Compute both formulas on same bootstrap distribution
 pv_old_formula <- mean(abs(result_tse$boot_dist) >= abs(result_tse$tco))
 pv_new_formula <- (sum(abs(result_tse$boot_dist) >= abs(result_tse$tco)) + 1) / (nb_test + 1)
 
-cat("Using same bootstrap distribution:\n")
+cat("Same bootstrap data, different formulas:\n")
 cat("  Old formula (mean):", pv_old_formula, "\n")
 cat("  New formula (+1 correction):", pv_new_formula, "\n\n")
 
-cat("The +1 correction prevents p-value = 0 and is statistically preferred.\n")
+cat("The +1 correction prevents p-value = 0. \n")
 ```
 
 ## 6. Test Parallel Mode
 
-With `boot_seeds`, parallel mode should produce **identical** results to sequential.
+With `boot_seeds`, parallel mode should produce **identical** results to
+sequential.
+
+Equivalent results, thankfully.
 
 ```{r parallel-mode-test, cache=TRUE}
 cat("=== Parallel vs Sequential (same boot_seeds) ===\n\n")
@@ -307,13 +328,15 @@ if (n_cores > 1) {
 
 ## 7. Test COBA Adjustment Reproducibility
 
+Booststrap adjustment is reproducible, though still not sure if correct.
+
 ```{r coba-test, cache=TRUE}
 cat("=== COBA Adjustment Test ===\n\n")
 
 # Run with COBA enabled
 result_coba <- wbg.boot.test.tse(x_test, stat_fn = stat_fn, nb = nb_test,
                                   p_max = 5, bootadj = TRUE, seed = 456,
-                                  parallel = FALSE, verbose = FALSE)
+                                  parallel = TRUE, verbose = FALSE)
 
 cat("Observed stat:", result_coba$obs_stat, "\n")
 cat("Adjusted stat:", result_coba$obs_stat_adj, "\n")
@@ -332,37 +355,4 @@ result_coba2 <- wbg.boot.test.tse(x_test, stat_fn = stat_fn, nb = nb_test,
 coba_reproducible <- isTRUE(all.equal(result_coba$pvalue_two_adj, 
                                        result_coba2$pvalue_two_adj))
 cat("COBA reproducible via seeds:", coba_reproducible, "\n")
-```
-
-## Final Summary
-
-```{r final-summary}
-cat("=========================================\n")
-cat("COMPLETE VERIFICATION SUMMARY\n")
-cat("=========================================\n\n")
-
-cat("--- Part 1: co.tse and wbg.boot.tse ---\n")
-cat("1. co.tse() matches co.wge():", all_match, "\n")
-cat("2. wbg.boot.tse(legacy_seed=TRUE) matches wbg.boot.wge():", boot_match, "\n")
-cat("3. wbg.boot.tse() reproducible via boot_seeds:", identical(run1$pv, run2$pv), "\n\n")
-
-cat("--- Part 2: wbg.boot.test.tse (parallel) ---\n")
-cat("4. Observed t-statistic match:", obs_stat_match, "\n")
-cat("5. AR null model match:", ar_order_match && phi_match, "\n")
-cat("6. Bootstrap distributions match:", boot_dist_match_parallel, "\n")
-cat("7. P-value formulas differ by design (+1 correction)\n")
-if (parallel_ran) {
-  cat("8. Parallel == Sequential (same boot_seeds):", parallel_identical, "\n")
-}
-cat("9. COBA reproducible via seeds:", coba_reproducible, "\n")
-
-cat("\n")
-all_verified <- all(all_match, boot_match, identical(run1$pv, run2$pv),
-                    obs_stat_match, ar_order_match, phi_match, 
-                    boot_dist_match_parallel, coba_reproducible)
-if (parallel_ran && !is.na(parallel_identical)) {
-  all_verified <- all_verified && parallel_identical
-}
-
-cat("*** ALL VERIFICATIONS PASSED:", all_verified, "***\n")
 ```

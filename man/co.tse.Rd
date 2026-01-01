@@ -4,12 +4,30 @@
 \alias{co.tse}
 \title{Cochrane-Orcutt Estimation for Trend with Correlated Errors}
 \usage{
-co.tse(x, maxp = 5)
+co.tse(
+  x,
+  maxp = 5,
+  ar_method = c("mle", "burg"),
+  criterion = c("aic", "aicc", "bic"),
+  n_best = 3,
+  tol = 1.001
+)
 }
 \arguments{
 \item{x}{A numeric vector containing the time series data.}
 
-\item{maxp}{Maximum AR order for AIC selection. Default is 5.}
+\item{maxp}{Maximum AR order for model selection. Default is 5.}
+
+\item{ar_method}{Character. Method for AR estimation: \code{"mle"} or
+\code{"burg"}. Default is \code{"mle"}.}
+
+\item{criterion}{Character. Information criterion for order selection:
+\code{"aic"}, \code{"aicc"}, or \code{"bic"}. Default is \code{"aic"}.}
+
+\item{n_best}{Integer. For MLE, number of top models to check for
+stationarity. Default is 3.}
+
+\item{tol}{Numeric. Tolerance for stationarity check. Default is 1.001.}
 }
 \value{
 A list containing:
@@ -17,17 +35,18 @@ A list containing:
 \item{z.x}{Residuals from initial OLS trend fit.}
 \item{b0hat}{Cochrane-Orcutt estimate of intercept.}
 \item{b1hat}{Cochrane-Orcutt estimate of slope.}
-\item{z.order}{AR order selected by AIC for the residuals.}
+\item{z.order}{AR order selected for the residuals.}
 \item{z.phi}{AR coefficients for the residual model.}
 \item{pvalue}{P-value for test of H0: slope = 0 (assumes uncorrelated
 transformed residuals; use \code{\link{wbg.boot.tse}} for more accurate
 p-values with correlated errors).}
 \item{tco}{t-statistic for the slope coefficient.}
+\item{ar_method}{The AR estimation method used.}
 }
 \description{
 Estimates linear trend in time series data with autocorrelated residuals
 using the Cochrane-Orcutt procedure. The residuals are modeled as an AR(p)
-process with order selected by AIC.
+process with order selected by information criterion.
 }
 \details{
 Fits the model
@@ -38,8 +57,8 @@ where \eqn{Z_t} is a stationary AR(p) process satisfying
 The procedure:
 \enumerate{
 \item Obtains OLS estimates of \eqn{a} and \eqn{b}
-\item Computes residuals and fits AR(p) via Burg estimation with AIC
-order selection
+\item Computes residuals and fits AR(p) via the specified method with
+information criterion order selection
 \item Transforms the data using \eqn{\hat{\phi}(B)} to obtain
 \eqn{W_t = \hat{\phi}(B)Y_t}
 \item Regresses \eqn{W_t} on the transformed time index
@@ -52,11 +71,15 @@ based inference with better significance level control.
 }
 \examples{
 \dontrun{
-# Estimate trend with Cochrane-Orcutt
+# Estimate trend with Cochrane-Orcutt using MLE
 data(hadley)
-result = co.tse(hadley, maxp = 5)
+result <- co.tse(hadley, maxp = 5, ar_method = "mle")
 cat("Slope estimate:", result$b1hat, "\n")
 cat("t-statistic:", result$tco, "\n")
+
+# Compare with Burg estimation
+result_burg <- co.tse(hadley, maxp = 5, ar_method = "burg")
+cat("Burg t-statistic:", result_burg$tco, "\n")
 }
 
 }
@@ -71,5 +94,5 @@ Environmental Statistics}, 2(4), 403-416.
 }
 \seealso{
 \code{\link{wbg.boot.tse}} for bootstrap-based trend test,
-\code{\link{aic.burg.wge}}, \code{\link{artrans.wge}}
+\code{\link{aic.ar.tse}}, \code{\link[tswge]{artrans.wge}}
 }

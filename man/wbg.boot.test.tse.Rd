@@ -9,6 +9,10 @@ wbg.boot.test.tse(
   stat_fn,
   nb = 399,
   p_max = 5,
+  ar_method = c("mle", "burg"),
+  criterion = c("aic", "aicc", "bic"),
+  n_best = 3,
+  tol = 1.001,
   bootadj = TRUE,
   seed = 0,
   boot_seeds = NULL,
@@ -28,10 +32,24 @@ create your own following the signature \code{function(x) -> numeric(1)}.}
 \item{nb}{Integer. Number of bootstrap replicates. Default is 399.}
 
 \item{p_max}{Integer. Maximum AR order to consider when fitting the null
-model. Order is selected by AIC. Default is 5.}
+model. Order is selected by information criterion. Default is 5.}
+
+\item{ar_method}{Character. Method for AR estimation of null model:
+\code{"mle"} (default) or \code{"burg"}. MLE is less biased near the
+unit circle but requires stationarity checking.}
+
+\item{criterion}{Character. Information criterion for AR order selection:
+\code{"aic"} (default), \code{"aicc"}, or \code{"bic"}.}
+
+\item{n_best}{Integer. For MLE, number of top models to check for
+stationarity before failing. Default is 3.}
+
+\item{tol}{Numeric. Tolerance for stationarity check (roots must have
+modulus > tol). Default is 1.001.}
 
 \item{bootadj}{Logical. If TRUE, performs the COBA variance adjustment.
-Default is TRUE.}
+Default is TRUE. Consider setting to FALSE when using MLE, as the
+bias correction may be less necessary.}
 
 \item{seed}{Integer. Random seed for reproducibility. If 0 (default), no
 seed is set. Used to generate \code{boot_seeds} if not provided.}
@@ -61,6 +79,7 @@ A list containing:
 \item{pvalue_lower}{Lower one-sided p-value (H1: stat < 0).}
 \item{ar_order}{AR order selected for null model.}
 \item{ar_phi}{AR coefficients for null model.}
+\item{ar_method}{AR estimation method used for null model.}
 \item{n}{Length of input series.}
 \item{nb}{Number of bootstrap replicates.}
 \item{boot_seeds}{Seeds used for bootstrap (for reproducibility).}
@@ -80,15 +99,23 @@ is assumed to be a stationary AR process with no trend.
 }
 \examples{
 \dontrun{
-# Basic usage
-stat_fn <- make.stat.co.tse(maxp = 5)
-result <- wbg.boot.test.tse(x, stat_fn, nb = 399)
+# Modern approach: MLE estimation (less biased)
+stat_fn <- make.stat.co.tse(maxp = 5, ar_method = "mle")
+result <- wbg.boot.test.tse(x, stat_fn, nb = 399, ar_method = "mle")
 
-# Reproduce exact results (even in parallel)
+# Try without COBA adjustment (MLE may not need it)
+result_no_adj <- wbg.boot.test.tse(x, stat_fn, nb = 399, 
+                                    ar_method = "mle", bootadj = FALSE)
+
+# Original WBG paper approach: Burg estimation with COBA
+stat_fn_burg <- make.stat.co.tse(maxp = 5, ar_method = "burg")
+result_burg <- wbg.boot.test.tse(x, stat_fn_burg, nb = 399,
+                                  ar_method = "burg", bootadj = TRUE)
+
+# Reproduce exact results
 result2 <- wbg.boot.test.tse(x, stat_fn, nb = 399, 
                               boot_seeds = result$boot_seeds,
-                              boot_seeds_adj = result$boot_seeds_adj,
-                              parallel = TRUE, num_cpu = 4)
+                              boot_seeds_adj = result$boot_seeds_adj)
 identical(result$pvalue_two, result2$pvalue_two)  # TRUE
 }
 
@@ -100,5 +127,5 @@ Environmental Statistics}, 2(4), 403-416.
 }
 \seealso{
 \code{\link{make.stat.co.tse}}, \code{\link{co.tse}},
-\code{\link{wbg.boot.tse}}
+\code{\link{wbg.boot.tse}}, \code{\link{aic.ar.tse}}
 }

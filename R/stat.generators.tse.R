@@ -5,22 +5,44 @@
 #'
 #' @param maxp Integer. Maximum AR order to consider for the error model.
 #'   Default is 5.
+#' @param ar_method Character. Method for AR estimation: \code{"mle"} or
+#'   \code{"burg"}. Default is \code{"mle"}.
+#' @param criterion Character. Information criterion for order selection:
+#'   \code{"aic"}, \code{"aicc"}, or \code{"bic"}. Default is \code{"aic"}.
+#' @param n_best Integer. For MLE, number of top models to check for
+#'   stationarity. Default is 3.
+#' @param tol Numeric. Tolerance for stationarity check. Default is 1.001.
 #'
 #' @return A function that takes a numeric vector \code{x} and returns
 #'   the Cochrane-Orcutt t-statistic for the trend coefficient.
 #'
-#' @seealso \code{\link{wbg.boot.test.tse}}, \code{\link{co.wge}}
+#' @seealso \code{\link{wbg.boot.test.tse}}, \code{\link{co.tse}}
 #'
 #' @examples
 #' \dontrun{
-#' stat_fn <- make.stat.co.tse(maxp = 3)
+#' # MLE-based statistic (default, less biased)
+#' stat_fn <- make.stat.co.tse(maxp = 5)
 #' result <- wbg.boot.test.tse(x, stat_fn = stat_fn)
+#' 
+#' # Burg-based statistic (original WBG paper approach)
+#' stat_fn_burg <- make.stat.co.tse(maxp = 5, ar_method = "burg")
+#' result_burg <- wbg.boot.test.tse(x, stat_fn = stat_fn_burg)
+#' 
+#' # Using BIC for model selection
+#' stat_fn_bic <- make.stat.co.tse(maxp = 5, criterion = "bic")
 #' }
 #'
 #' @export
-make.stat.co.tse <- function(maxp = 5) {
+make.stat.co.tse <- function(maxp = 5, ar_method = c("mle", "burg"),
+                             criterion = c("aic", "aicc", "bic"),
+                             n_best = 3, tol = 1.001) {
+  
+  ar_method <- match.arg(ar_method)
+  criterion <- match.arg(criterion)
+  
   function(x) {
-    co.tse(x, maxp = maxp)$tco
+    co.tse(x, maxp = maxp, ar_method = ar_method,
+           criterion = criterion, n_best = n_best, tol = tol)$tco
   }
 }
 

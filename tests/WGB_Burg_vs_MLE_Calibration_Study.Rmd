@@ -1,0 +1,447 @@
+---
+title: "WBG Bootstrap Test Calibration Study"
+subtitle: "Comparing Burg vs MLE Estimation with and without COBA Adjustment"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = TRUE, results = 'hold')
+```
+
+## Configuration
+
+```{r config}
+# --- Configurable Parameters ---
+
+# AR(p) models to test: list of phi coefficient vectors
+# Each element is a vector of AR coefficients
+ar_models <- list(
+  #"AR(1) φ=0.8"  = c(0.8)
+  #"AR(1) φ=0.9"  = c(0.9),
+  #"AR(1) φ=0.95" = c(0.95),
+  #"AR(2) φ=(0.5, 0.3)" = c(0.5, 0.3),
+  #"AR(2) φ=(1.0, -0.5)" = c(1.0, -0.5)
+)
+
+# Series length
+n_obs <- 100
+
+# Number of simulations per model/method combination
+n_sims <- 100
+
+# Bootstrap replicates within each test
+n_boot <- 500
+
+# Maximum AR order for model fitting
+p_max <- 5
+
+# Significance level
+alpha <- 0.05
+
+# Random seed for reproducibility
+master_seed <- 42
+
+# Criteria to test for MLE (Burg only supports AIC)
+mle_criteria <- c("aic")
+```
+
+## Setup
+
+```{r load-packages}
+#library(tswge)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+
+# Source custom functions (adjust path as needed)
+# source("ar.mle.tse.R")
+# source("co.tse.R")
+# source("stat.generators.tse.R")
+# source("wbg.boot.test.tse.R")
+```
+
+## Stationarity Check
+
+```{r stationarity-check}
+cat("=== Stationarity Check ===\n\n")
+
+valid_models <- list()
+
+for (model_name in names(ar_models)) {
+  phi <- ar_models[[model_name]]
+  is_stationary <- check.stationary.tse(phi, tol = 1.0)
+  status <- ifelse(is_stationary, "✓ Stationary", "✗ Non-stationary")
+  
+  cat(sprintf("%s: φ = (%s) - %s\n", 
+              model_name, 
+              paste(round(phi, 3), collapse = ", "),
+              status))
+  
+  if (is_stationary) {
+    valid_models[[model_name]] <- phi
+  }
+}
+
+if (length(valid_models) == 0) {
+  stop("No valid stationary models provided!")
+}
+
+if (length(valid_models) < length(ar_models)) {
+  cat(sprintf("\nProceeding with %d of %d models.\n", 
+              length(valid_models), length(ar_models)))
+}
+
+ar_models <- valid_models
+```
+
+## Test Variants
+
+We will test all combinations of:
+
+- **Methods:** Burg, MLE
+- **Criteria:** AIC, AICC, BIC
+- **Adjustment:** Raw, with COBA
+
+Total: 2 methods × 3 criteria × 2 adjustments = 12 variants per model
+
+```{r define-variants}
+# Define all test variants (2 methods x 3 criteria = 6 variants)
+test_variants <- expand.grid(
+  method = c("burg", "mle"),
+  criterion = c("aic", "aicc", "bic"),
+  stringsAsFactors = FALSE
+) %>%
+  mutate(variant_name = paste0(toupper(method), " + ", toupper(criterion)))
+
+kable(test_variants, 
+      col.names = c("Method", "Criterion", "Variant Name"),
+      caption = "Test Variants") %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"), 
+                full_width = FALSE)
+```
+
+## Run Simulation
+
+Under H0 (no trend), we expect the test to reject approximately `r alpha * 100`% of the time.
+
+```{r run-simulation, cache=TRUE}
+set.seed(master_seed)
+
+results <- data.frame()
+
+n_models <- length(ar_models)
+n_variants <- nrow(test_variants)
+total_tests <- n_models * n_sims * n_variants * 2  # x2 for raw + COBA
+
+cat(sprintf("Models: %d\n", n_models))
+cat(sprintf("Simulations per model: %d\n", n_sims))
+cat(sprintf("Variants: %d (x2 for raw/COBA)\n", n_variants))
+cat(sprintf("Total tests: %d\n\n", total_tests))
+
+for (model_name in names(ar_models)) {
+  phi <- ar_models[[model_name]]
+  cat(sprintf("Model: %s\n", model_name))
+  
+  for (sim in 1:n_sims) {
+    # Generate AR(p) series under H0 (no trend)
+    sim_seed <- master_seed + sim + sum(round(phi * 10000))
+    x <- gen.arma.wge(n_obs, phi = phi, plot = FALSE, sn = sim_seed)
+    
+    # Test each variant
+    for (v in 1:nrow(test_variants)) {
+      method <- test_variants$method[v]
+      criterion <- test_variants$criterion[v]
+      variant_name <- test_variants$variant_name[v]
+      
+      # Create stat function
+      stat_fn <- make.stat.co.tse(maxp = p_max, ar_method = method, 
+                                   criterion = criterion)
+      
+      # Run bootstrap test
+      result <- tryCatch({
+        wbg.boot.test.tse(x, stat_fn = stat_fn, nb = n_boot, p_max = p_max,
+                          ar_method = method, criterion = criterion,
+                          bootadj = TRUE, verbose = FALSE, parallel = TRUE)
+      }, error = function(e){
+        message(sprintf("  [Error] Model: %s | Sim: %d | Method: %s | Criterion: %s - %s",
+                        model_name, sim, method, criterion, e$message))
+      })
+      
+      if (!is.null(result)) {
+        # Raw (no COBA)
+        results <- rbind(results, data.frame(
+          model = model_name,
+          sim = sim,
+          method = method,
+          criterion = criterion,
+          variant = variant_name,
+          adjusted = FALSE,
+          pvalue = result$pvalue_two,
+          reject = result$pvalue_two < alpha,
+          stringsAsFactors = FALSE
+        ))
+        
+        # With COBA
+        results <- rbind(results, data.frame(
+          model = model_name,
+          sim = sim,
+          method = method,
+          criterion = criterion,
+          variant = variant_name,
+          adjusted = TRUE,
+          pvalue = result$pvalue_two_adj,
+          reject = result$pvalue_two_adj < alpha,
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+  }
+  cat("  done\n")
+}
+
+cat("\nSimulation complete!\n")
+```
+
+## Results
+
+### Summary Table
+
+```{r summary-table}
+summary_table <- results %>%
+  group_by(model, method, criterion, variant, adjusted) %>%
+  summarise(
+    n_tests = n(),
+    n_reject = sum(reject),
+    obs_sig_level = mean(reject),
+    se = sqrt(obs_sig_level * (1 - obs_sig_level) / n_tests),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    variant_label = paste0(variant, ifelse(adjusted, " + COBA", "")),
+    obs_pct = sprintf("%.1f%%", obs_sig_level * 100),
+    ci = sprintf("(%.1f%%, %.1f%%)", 
+                 pmax(0, (obs_sig_level - 1.96 * se)) * 100,
+                 (obs_sig_level + 1.96 * se) * 100),
+    calibrated = abs(obs_sig_level - alpha) <= 2 * se,
+    inflated = obs_sig_level > alpha + 2 * se
+  )
+
+kable(summary_table %>% 
+        select(model, variant_label, n_tests, obs_pct, ci) %>%
+        rename(Model = model,
+               Method = variant_label,
+               `N Tests` = n_tests,
+               `Obs. Sig. Level` = obs_pct,
+               `95% CI` = ci),
+      caption = sprintf("Observed Significance Levels (Nominal α = %.0f%%)", alpha * 100)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size = 11) %>%
+  row_spec(which(summary_table$inflated), background = "#ffcccc") %>%
+  row_spec(which(summary_table$calibrated), background = "#ccffcc")
+```
+
+*Green: Well-calibrated (within 2 SE of nominal `r alpha*100`%)*
+*Red: Inflated (significantly above nominal)*
+
+### Comparison by Model
+
+```{r plot-by-model, fig.width=14, fig.height=10}
+plot_data <- summary_table %>%
+  mutate(model = factor(model, levels = names(ar_models)))
+
+ggplot(plot_data, aes(x = variant_label, y = obs_sig_level, fill = method)) +
+  geom_col(alpha = 0.8) +
+  geom_errorbar(aes(ymin = pmax(0, obs_sig_level - 1.96 * se), 
+                    ymax = obs_sig_level + 1.96 * se),
+                width = 0.2) +
+  geom_hline(yintercept = alpha, linetype = "dashed", color = "red", linewidth = 1) +
+  facet_wrap(~model, ncol = 2) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, NA)) +
+  scale_fill_manual(values = c("burg" = "steelblue", "mle" = "darkorange")) +
+  labs(
+    title = "Observed Significance Levels by Model and Method",
+    subtitle = sprintf("Nominal α = %.0f%% (red dashed) | n = %d | %d sims | %d bootstrap reps",
+                       alpha * 100, n_obs, n_sims, n_boot),
+    x = NULL,
+    y = "Observed Significance Level",
+    fill = "Method"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+    legend.position = "bottom",
+    strip.text = element_text(size = 10, face = "bold")
+  )
+```
+
+### Method Comparison (Averaged Across Models)
+
+```{r method-comparison, fig.width=12, fig.height=6}
+method_summary <- summary_table %>%
+  group_by(variant_label) %>%
+  summarise(
+    mean_sig_level = mean(obs_sig_level),
+    se = sd(obs_sig_level) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  arrange(abs(mean_sig_level - alpha))
+
+ggplot(method_summary, aes(x = reorder(variant_label, abs(mean_sig_level - alpha)), 
+                            y = mean_sig_level, fill = variant_label)) +
+  geom_col(alpha = 0.8) +
+  geom_errorbar(aes(ymin = mean_sig_level - 1.96 * se,
+                    ymax = mean_sig_level + 1.96 * se),
+                width = 0.2) +
+  geom_hline(yintercept = alpha, linetype = "dashed", color = "red", linewidth = 1) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, NA)) +
+  labs(
+    title = "Average Significance Level Across All Models",
+    subtitle = "Ordered by distance from nominal (best on left)",
+    x = NULL,
+    y = "Mean Observed Significance Level"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+```
+
+### Criterion Comparison
+
+```{r criterion-comparison, fig.width=12, fig.height=8}
+ggplot(summary_table, aes(x = criterion, y = obs_sig_level, fill = adjusted)) +
+  geom_col(position = "dodge", alpha = 0.8) +
+  geom_hline(yintercept = alpha, linetype = "dashed", color = "red", linewidth = 1) +
+  facet_grid(model ~ method) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, NA)) +
+  scale_fill_manual(values = c("FALSE" = "steelblue", "TRUE" = "forestgreen"),
+                    labels = c("FALSE" = "Raw", "TRUE" = "+ COBA")) +
+  labs(
+    title = "Criterion Comparison: AIC vs AICC vs BIC",
+    subtitle = "By method (Burg vs MLE) and model",
+    x = "Criterion",
+    y = "Observed Significance Level",
+    fill = "Adjustment"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(strip.text = element_text(face = "bold"))
+```
+
+### Method Comparison (Burg vs MLE)
+
+```{r method-head-to-head, fig.width=12, fig.height=8}
+ggplot(summary_table, aes(x = method, y = obs_sig_level, fill = adjusted)) +
+  geom_col(position = "dodge", alpha = 0.8) +
+  geom_hline(yintercept = alpha, linetype = "dashed", color = "red", linewidth = 1) +
+  facet_grid(model ~ criterion) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, NA)) +
+  scale_fill_manual(values = c("FALSE" = "steelblue", "TRUE" = "forestgreen"),
+                    labels = c("FALSE" = "Raw", "TRUE" = "+ COBA")) +
+  labs(
+    title = "Method Comparison: Burg vs MLE",
+    subtitle = "By criterion (AIC/AICC/BIC) and model",
+    x = "Method",
+    y = "Observed Significance Level",
+    fill = "Adjustment"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(strip.text = element_text(face = "bold"))
+```
+
+### COBA Improvement
+
+```{r coba-improvement}
+coba_comparison <- summary_table %>%
+  select(model, variant, adjusted, obs_sig_level) %>%
+  pivot_wider(names_from = adjusted, values_from = obs_sig_level,
+              names_prefix = "adj_") %>%
+  mutate(
+    raw = adj_FALSE,
+    with_coba = adj_TRUE,
+    improvement = raw - with_coba,
+    pct_improvement = improvement / raw * 100
+  ) %>%
+  select(model, variant, raw, with_coba, improvement)
+
+kable(coba_comparison %>%
+        mutate(across(c(raw, with_coba, improvement), ~sprintf("%.3f", .))) %>%
+        rename(Model = model,
+               Method = variant,
+               Raw = raw,
+               `With COBA` = with_coba,
+               `Improvement` = improvement),
+      caption = "COBA Adjustment Effect (positive = COBA reduces inflation)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+### P-value Distributions
+
+```{r pvalue-dist, fig.width=12, fig.height=10}
+results %>%
+  mutate(
+    variant_label = paste0(variant, ifelse(adjusted, " + COBA", "")),
+    model = factor(model, levels = names(ar_models))
+  ) %>%
+  ggplot(aes(x = pvalue)) +
+  geom_histogram(bins = 20, fill = "steelblue", alpha = 0.7) +
+  geom_vline(xintercept = alpha, linetype = "dashed", color = "red") +
+  facet_grid(model ~ variant_label, scales = "free_y") +
+  labs(
+    title = "P-value Distributions Under H0",
+    subtitle = "Should be approximately uniform if well-calibrated",
+    x = "P-value",
+    y = "Count"
+  ) +
+  theme_minimal(base_size = 9) +
+  theme(strip.text = element_text(size = 7))
+```
+
+## Summary
+
+```{r final-summary}
+cat("=== Configuration ===\n")
+cat(sprintf("Series length: %d\n", n_obs))
+cat(sprintf("Simulations per condition: %d\n", n_sims))
+cat(sprintf("Bootstrap replicates: %d\n", n_boot))
+cat(sprintf("Nominal α: %.0f%%\n\n", alpha * 100))
+
+cat("=== Best Method by Model ===\n\n")
+
+best_by_model <- summary_table %>%
+  mutate(dist_from_nominal = abs(obs_sig_level - alpha)) %>%
+  group_by(model) %>%
+  slice_min(dist_from_nominal, n = 1) %>%
+  ungroup()
+
+for (i in 1:nrow(best_by_model)) {
+  row <- best_by_model[i, ]
+  cat(sprintf("%s:\n  Best: %s (%.1f%%)\n\n", 
+              row$model, row$variant_label, row$obs_sig_level * 100))
+}
+
+cat("=== Overall Ranking (by mean distance from nominal) ===\n\n")
+
+overall_ranking <- summary_table %>%
+  group_by(variant_label) %>%
+  summarise(
+    mean_sig = mean(obs_sig_level),
+    mean_dist = mean(abs(obs_sig_level - alpha)),
+    .groups = "drop"
+  ) %>%
+  arrange(mean_dist)
+
+for (i in 1:nrow(overall_ranking)) {
+  row <- overall_ranking[i, ]
+  cat(sprintf("%d. %s (mean = %.1f%%, dist = %.3f)\n", 
+              i, row$variant_label, row$mean_sig * 100, row$mean_dist))
+}
+```

@@ -13,9 +13,19 @@
 #'   create your own following the signature \code{function(x) -> numeric(1)}.
 #' @param nb Integer. Number of bootstrap replicates. Default is 399.
 #' @param p_max Integer. Maximum AR order to consider when fitting the null
-#'   model. Order is selected by AIC. Default is 5.
+#'   model. Order is selected by information criterion. Default is 5.
+#' @param ar_method Character. Method for AR estimation of null model:
+#'   \code{"mle"} (default) or \code{"burg"}. MLE is less biased near the
+#'   unit circle but requires stationarity checking.
+#' @param criterion Character. Information criterion for AR order selection:
+#'   \code{"aic"} (default), \code{"aicc"}, or \code{"bic"}.
+#' @param n_best Integer. For MLE, number of top models to check for
+#'   stationarity before failing. Default is 3.
+#' @param tol Numeric. Tolerance for stationarity check (roots must have
+#'   modulus > tol). Default is 1.001.
 #' @param bootadj Logical. If TRUE, performs the COBA variance adjustment.
-#'   Default is TRUE.
+#'   Default is TRUE. Consider setting to FALSE when using MLE, as the
+#'   bias correction may be less necessary.
 #' @param seed Integer. Random seed for reproducibility. If 0 (default), no
 #'   seed is set. Used to generate \code{boot_seeds} if not provided.
 #' @param boot_seeds Optional numeric vector of seeds for each bootstrap
@@ -38,6 +48,7 @@
 #'   \item{pvalue_lower}{Lower one-sided p-value (H1: stat < 0).}
 #'   \item{ar_order}{AR order selected for null model.}
 #'   \item{ar_phi}{AR coefficients for null model.}
+#'   \item{ar_method}{AR estimation method used for null model.}
 #'   \item{n}{Length of input series.}
 #'   \item{nb}{Number of bootstrap replicates.}
 #'   \item{boot_seeds}{Seeds used for bootstrap (for reproducibility).}
@@ -56,26 +67,41 @@
 #' Environmental Statistics}, 2(4), 403-416.
 #'
 #' @seealso \code{\link{make.stat.co.tse}}, \code{\link{co.tse}}, 
-#'   \code{\link{wbg.boot.tse}}
+#'   \code{\link{wbg.boot.tse}}, \code{\link{aic.ar.tse}}
 #'
 #' @examples
 #' \dontrun{
-#' # Basic usage
-#' stat_fn <- make.stat.co.tse(maxp = 5)
-#' result <- wbg.boot.test.tse(x, stat_fn, nb = 399)
+#' # Modern approach: MLE estimation (less biased)
+#' stat_fn <- make.stat.co.tse(maxp = 5, ar_method = "mle")
+#' result <- wbg.boot.test.tse(x, stat_fn, nb = 399, ar_method = "mle")
 #' 
-#' # Reproduce exact results (even in parallel)
+#' # Try without COBA adjustment (MLE may not need it)
+#' result_no_adj <- wbg.boot.test.tse(x, stat_fn, nb = 399, 
+#'                                     ar_method = "mle", bootadj = FALSE)
+#' 
+#' # Original WBG paper approach: Burg estimation with COBA
+#' stat_fn_burg <- make.stat.co.tse(maxp = 5, ar_method = "burg")
+#' result_burg <- wbg.boot.test.tse(x, stat_fn_burg, nb = 399,
+#'                                   ar_method = "burg", bootadj = TRUE)
+#' 
+#' # Reproduce exact results
 #' result2 <- wbg.boot.test.tse(x, stat_fn, nb = 399, 
 #'                               boot_seeds = result$boot_seeds,
-#'                               boot_seeds_adj = result$boot_seeds_adj,
-#'                               parallel = TRUE, num_cpu = 4)
+#'                               boot_seeds_adj = result$boot_seeds_adj)
 #' identical(result$pvalue_two, result2$pvalue_two)  # TRUE
 #' }
 #'
 #' @export
-wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
+wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5,
+                              ar_method = c("mle", "burg"),
+                              criterion = c("aic", "aicc", "bic"),
+                              n_best = 3, tol = 1.001,
+                              bootadj = TRUE,
                               seed = 0, boot_seeds = NULL, boot_seeds_adj = NULL,
                               parallel = FALSE, num_cpu = 1, verbose = TRUE) {
+  
+  ar_method <- match.arg(ar_method)
+  criterion <- match.arg(criterion)
   
   if (parallel) {
     if (num_cpu == 0) {
@@ -112,9 +138,18 @@ wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
   obs_stat <- stat_fn(x)
   
   # Fit AR model under H0: no trend, stationary AR
-  ar_fit <- aic.burg.wge(x, p = 1:p_max)
+  if (verbose) message("Fitting null model (", ar_method, ")...")
+  
+  ar_fit <- aic.ar.tse(x, p_max = p_max, method = ar_method,
+                       criterion = criterion, n_best = n_best, tol = tol, stationary = TRUE)
   ar_phi <- ar_fit$phi
   ar_p <- ar_fit$p
+  ar_method_used <- ar_fit$method_used
+  
+  if (verbose) {
+    message("  Selected AR(", ar_p, ") with phi = [", 
+            paste(round(ar_phi, 4), collapse = ", "), "]")
+  }
   
   # --- First Bootstrap ---
   if (verbose) message("Running first bootstrap (", nb, " replicates)...")
@@ -122,12 +157,16 @@ wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
   if (use_parallel) {
     boot_results <- .run_parallel_bootstrap(
       nb = nb, n = n, phi = ar_phi, p_max = p_max,
+      ar_method = ar_method, criterion = criterion,
+      n_best = n_best, tol = tol,
       stat_fn = stat_fn, bootadj = bootadj, boot_seeds = boot_seeds,
       num_cpu = num_cpu, verbose = verbose
     )
   } else {
     boot_results <- .run_sequential_bootstrap(
       nb = nb, n = n, phi = ar_phi, p_max = p_max,
+      ar_method = ar_method, criterion = criterion,
+      n_best = n_best, tol = tol,
       stat_fn = stat_fn, bootadj = bootadj, boot_seeds = boot_seeds,
       verbose = verbose
     )
@@ -148,6 +187,7 @@ wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
     pvalue_lower = pvalue_lower,
     ar_order     = ar_p,
     ar_phi       = ar_phi,
+    ar_method    = ar_method_used,
     n            = n,
     nb           = nb,
     boot_seeds   = boot_seeds
@@ -199,7 +239,8 @@ wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
 
 # --- Internal helper functions ---
 
-.run_sequential_bootstrap <- function(nb, n, phi, p_max, stat_fn, bootadj, 
+.run_sequential_bootstrap <- function(nb, n, phi, p_max, ar_method, criterion,
+                                      n_best, tol, stat_fn, bootadj, 
                                       boot_seeds, verbose) {
   if (verbose) pb <- txtProgressBar(min = 0, max = nb, style = 3)
   
@@ -210,8 +251,16 @@ wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
     if (verbose) setTxtProgressBar(pb, i)
     
     if (bootadj) {
-      ar_boot <- aic.burg.wge(xb, p = 1:p_max)
-      list(stat = stat, phi = ar_boot$phi, phi1 = 1 - sum(ar_boot$phi))
+      ar_boot <- tryCatch(
+        aic.ar.tse(xb, p_max = p_max, method = ar_method,
+                   criterion = criterion, n_best = n_best, tol = tol, stationary = TRUE),
+        error = function(e) {
+          # Fallback to burg if MLE fails
+          aic.burg.wge(xb, p = 1:p_max)
+        }
+      )
+      boot_phi <- if (!is.null(ar_boot$phi)) ar_boot$phi else ar_boot$phi
+      list(stat = stat, phi = boot_phi, phi1 = 1 - sum(boot_phi))
     } else {
       list(stat = stat)
     }
@@ -236,14 +285,21 @@ wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
   results
 }
 
-.run_parallel_bootstrap <- function(nb, n, phi, p_max, stat_fn, bootadj,
+.run_parallel_bootstrap <- function(nb, n, phi, p_max, ar_method, criterion,
+                                    n_best, tol, stat_fn, bootadj,
                                     boot_seeds, num_cpu, verbose) {
   cl <- parallel::makeCluster(num_cpu)
   on.exit(parallel::stopCluster(cl), add = TRUE)
   
-  parallel::clusterExport(cl, c("stat_fn", "phi", "n", "p_max", "bootadj", "boot_seeds"),
+  parallel::clusterExport(cl, c("stat_fn", "phi", "n", "p_max", "bootadj", 
+                                "boot_seeds", "ar_method", "criterion",
+                                "n_best", "tol"),
                           envir = environment())
-  parallel::clusterEvalQ(cl, library(tswge))
+  parallel::clusterEvalQ(cl, {
+    library(tswge2)
+    # Source the MLE functions if they're not in a package
+    # This assumes aic.ar.wge and check.stationary are available
+  })
   
   if (verbose && requireNamespace("pbapply", quietly = TRUE)) {
     results <- pbapply::pblapply(1:nb, function(i) {
@@ -251,8 +307,13 @@ wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
       stat <- stat_fn(xb)
       
       if (bootadj) {
-        ar_boot <- aic.burg.wge(xb, p = 1:p_max)
-        list(stat = stat, phi = ar_boot$phi, phi1 = 1 - sum(ar_boot$phi))
+        ar_boot <- tryCatch(
+          aic.ar.tse(xb, p_max = p_max, method = ar_method,
+                     criterion = criterion, n_best = n_best, tol = tol, stationary = TRUE),
+          error = function(e) aic.burg.wge(xb, p = 1:p_max)
+        )
+        boot_phi <- ar_boot$phi
+        list(stat = stat, phi = boot_phi, phi1 = 1 - sum(boot_phi))
       } else {
         list(stat = stat)
       }
@@ -264,8 +325,13 @@ wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
       stat <- stat_fn(xb)
       
       if (bootadj) {
-        ar_boot <- aic.burg.wge(xb, p = 1:p_max)
-        list(stat = stat, phi = ar_boot$phi, phi1 = 1 - sum(ar_boot$phi))
+        ar_boot <- tryCatch(
+          aic.ar.tse(xb, p_max = p_max, method = ar_method,
+                     criterion = criterion, n_best = n_best, tol = tol, stationary = TRUE),
+          error = function(e) aic.burg.wge(xb, p = 1:p_max)
+        )
+        boot_phi <- ar_boot$phi
+        list(stat = stat, phi = boot_phi, phi1 = 1 - sum(boot_phi))
       } else {
         list(stat = stat)
       }
@@ -282,7 +348,7 @@ wbg.boot.test.tse <- function(x, stat_fn, nb = 399, p_max = 5, bootadj = TRUE,
   
   parallel::clusterExport(cl, c("stat_fn", "phi", "n", "boot_seeds"),
                           envir = environment())
-  parallel::clusterEvalQ(cl, library(tswge))
+  parallel::clusterEvalQ(cl, library(tswge2))
   
   if (verbose && requireNamespace("pbapply", quietly = TRUE)) {
     results <- unlist(pbapply::pblapply(1:nb, function(i) {

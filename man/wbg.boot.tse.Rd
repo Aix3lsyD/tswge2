@@ -8,6 +8,10 @@ wbg.boot.tse(
   x,
   nb = 399,
   maxp = 5,
+  ar_method = c("mle", "burg"),
+  criterion = c("aic", "aicc", "bic"),
+  n_best = 3,
+  tol = 1.001,
   sn = 0,
   maxnull_p = NA,
   boot_seeds = NULL,
@@ -21,6 +25,17 @@ wbg.boot.tse(
 
 \item{maxp}{Maximum AR order for AIC selection in the Cochrane-Orcutt
 procedure. Default is 5.}
+
+\item{ar_method}{Character. Method for AR estimation: \code{"mle"} (default)
+or \code{"burg"}. MLE is less biased near the unit circle.}
+
+\item{criterion}{Character. Information criterion for order selection:
+\code{"aic"} (default), \code{"aicc"}, or \code{"bic"}.}
+
+\item{n_best}{Integer. For MLE, number of top models to check for
+stationarity. Default is 3.}
+
+\item{tol}{Numeric. Tolerance for stationarity check. Default is 1.001.}
 
 \item{sn}{Random seed for reproducibility. If 0 (default), no seed is set.}
 
@@ -42,6 +57,7 @@ is \code{FALSE}.}
 A list containing:
 \item{p}{AR order selected for the null model.}
 \item{phi}{AR coefficients for the null model.}
+\item{ar_method}{AR estimation method used.}
 \item{tco}{Observed t-statistic from the Cochrane-Orcutt procedure.}
 \item{pv}{Bootstrap p-value (two-sided).}
 \item{boot_dist}{Vector of bootstrap t-statistics.}
@@ -60,27 +76,28 @@ The null hypothesis is H0: b = 0 (no linear trend) in the model
 where \eqn{Z_t} is a stationary AR(p) process.
 
 Under H0, any trending behavior is attributed to the correlation structure
-alone. The AR model is fit to the raw series (not detrended) using the Burg
-(maximum entropy) estimator, which guarantees stationarity. Bootstrap
-samples are generated from this fitted AR model, and the Cochrane-Orcutt
-t-statistic is computed for each. The p-value is the proportion of
-bootstrap |t| values that exceed the observed |t|.
+alone. The AR model is fit to the raw series (not detrended) using the
+specified estimation method. Bootstrap samples are generated from this
+fitted AR model, and the Cochrane-Orcutt t-statistic is computed for each.
+The p-value is the proportion of bootstrap |t| values that exceed the
+observed |t|.
 }
 \examples{
 \dontrun{
-# Test for trend in a time series
+# Test for trend using MLE estimation (default)
 data(hadley)
-result = wbg.boot.tse(hadley, nb = 399, maxp = 5, sn = 123)
+result <- wbg.boot.tse(hadley, nb = 399, maxp = 5, sn = 123)
 print(result$pv)
 
-# Reproduce exact same results using returned seeds
-result2 = wbg.boot.tse(hadley, nb = 399, maxp = 5, boot_seeds = result$boot_seeds)
-identical(result$pv, result2$pv)  # TRUE
+# Compare with Burg estimation
+result_burg <- wbg.boot.tse(hadley, nb = 399, maxp = 5, sn = 123,
+                             ar_method = "burg")
 
-# Legacy mode for comparison with wbg.boot.wge()
-result_legacy = wbg.boot.tse(hadley, nb = 399, maxp = 5, sn = 123, legacy_seed = TRUE)
-result_old = wbg.boot.wge(hadley, nb = 399, maxp = 5, sn = 123)
-identical(result_legacy$pv, result_old$pv)  # TRUE
+# Reproduce exact same results using returned seeds
+result2 <- wbg.boot.tse(hadley, nb = 399, maxp = 5, 
+                         boot_seeds = result$boot_seeds,
+                         ar_method = "mle")
+identical(result$pv, result2$pv)  # TRUE
 }
 
 }
@@ -90,6 +107,6 @@ Trend in Time Series Data." \emph{Journal of Agricultural, Biological, and
 Environmental Statistics}, 2(4), 403-416.
 }
 \seealso{
-\code{\link{co.wge}}, \code{\link{aic.burg.wge}},
+\code{\link{co.tse}}, \code{\link{aic.ar.wge}},
 \code{\link{gen.arma.wge}}
 }

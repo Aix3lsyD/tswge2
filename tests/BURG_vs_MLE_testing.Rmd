@@ -1,0 +1,282 @@
+---
+title: "Simulation Study: WGB-BURG vs WGB-MLE"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, results = 'hold')
+#library(tswge2)  
+```
+
+## Overview
+
+The overall goal of this RMD file is to test whether it makes a difference to use MLE estimates over the BURG estimates in the WGB bootstrap test for trend.  The WGB paper was written in 1997, so I'm curious if MLE is more approachable now with modern computing.  Will it make a difference?  Better power?  The burg estimates are known to be worse as the root approaches the unit circle. Maybe bootstrapping MLE improves the test over BURG? 
+
+### Checking to see if our new functions work. 
+
+The seem to work. 
+
+```{r}
+
+check.stationary.tse(1.5)
+check.stationary.tse(1)
+check.stationary.tse(0.99)
+check.stationary.tse(c(0.5, 0.7))
+
+```
+
+### Verifying better MLE vs BURG via our methods
+
+```{r}
+#' Simulation: Yule-Walker vs Burg vs MLE Estimation Bias
+#' 
+#' Compares all three methods as phi approaches the unit circle
+#' YW should show the most dramatic bias
+
+#library(tswge)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Source the MLE functions
+# source("ar.mle.tse.R")
+
+# --- Simulation Parameters ---
+phi_values <- c(seq(0.5, 0.9, by = 0.1), 0.92, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 0.995, 0.999)
+n_reps <- 100
+n_obs <- 20
+p_max <- 5
+
+set.seed(42)
+
+# --- Run Simulation ---
+results <- data.frame()
+
+cat("Running simulation...\n")
+for (phi in phi_values) {
+  cat(sprintf("  phi = %.3f\n", phi))
+  
+  for (rep in 1:n_reps) {
+    x <- gen.arma.wge(n_obs, phi = phi, plot = FALSE, sn = rep * 1000 + round(phi * 1000))
+    
+    # Yule-Walker
+    est_yw <- tryCatch({
+      fit <- ar(x, order.max = p_max, aic = TRUE, method = "yule-walker")
+      if (fit$order == 1) as.numeric(fit$ar[1]) else NA
+    }, error = function(e) NA)
+    
+    # Burg
+    est_burg <- tryCatch({
+      fit <- aic.burg.wge(x, p = 1:p_max)
+      if (fit$p == 1) fit$phi[1] else NA
+    }, error = function(e) NA)
+    
+    # MLE (no stationarity restriction)
+    est_mle <- tryCatch({
+      fit <- aic.ar.mle.tse(x, p_max = p_max, stationary = FALSE, silent = TRUE)
+      if (fit$p == 1) fit$phi[1] else NA
+    }, error = function(e) NA)
+    
+    results <- rbind(results, data.frame(
+      true_phi = phi,
+      yw = est_yw,
+      burg = est_burg,
+      mle = est_mle
+    ))
+  }
+}
+
+# --- Compute Mean Estimates, Bias, Variance, MSE ---
+summary_stats <- results %>%
+  filter(!is.na(yw) & !is.na(burg) & !is.na(mle)) %>%
+  group_by(true_phi) %>%
+  summarise(
+    n = n(),
+    # Means
+    mean_yw = mean(yw),
+    mean_burg = mean(burg),
+    mean_mle = mean(mle),
+    # Bias
+    bias_yw = mean(yw - true_phi),
+    bias_burg = mean(burg - true_phi),
+    bias_mle = mean(mle - true_phi),
+    # Variance
+    var_yw = var(yw),
+    var_burg = var(burg),
+    var_mle = var(mle),
+    # MSE (computed directly)
+    mse_yw = mean((yw - true_phi)^2),
+    mse_burg = mean((burg - true_phi)^2),
+    mse_mle = mean((mle - true_phi)^2),
+    .groups = "drop"
+  )
+
+# --- Plot 1: Mean Estimate vs True Phi ---
+plot_data <- summary_stats %>%
+  select(true_phi, mean_yw, mean_burg, mean_mle) %>%
+  pivot_longer(cols = c(mean_yw, mean_burg, mean_mle), 
+               names_to = "method", values_to = "estimate") %>%
+  mutate(method = recode(method, 
+                         mean_yw = "Yule-Walker", 
+                         mean_burg = "Burg", 
+                         mean_mle = "MLE"))
+
+p1 <- ggplot(plot_data, aes(x = true_phi)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  geom_line(aes(y = estimate, color = method), linewidth = 1.2) +
+  geom_point(aes(y = estimate, color = method), size = 2.5) +
+  scale_color_manual(values = c("Yule-Walker" = "red3", 
+                                "Burg" = "steelblue", 
+                                "MLE" = "forestgreen")) +
+  labs(
+    title = "AR(1) Coefficient Estimation: YW vs Burg vs MLE",
+    subtitle = sprintf("n = %d, %d reps | Dashed = true value", n_obs, n_reps),
+    x = "True φ",
+    y = "Mean Estimated φ",
+    color = "Method"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+
+print(p1)
+
+# --- Plot 2: Bias Comparison ---
+plot_data_bias <- summary_stats %>%
+  select(true_phi, bias_yw, bias_burg, bias_mle) %>%
+  pivot_longer(cols = c(bias_yw, bias_burg, bias_mle), 
+               names_to = "method", values_to = "bias") %>%
+  mutate(method = recode(method, 
+                         bias_yw = "Yule-Walker", 
+                         bias_burg = "Burg", 
+                         bias_mle = "MLE"))
+
+p2 <- ggplot(plot_data_bias, aes(x = true_phi)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  geom_line(aes(y = bias, color = method), linewidth = 1.2) +
+  geom_point(aes(y = bias, color = method), size = 2.5) +
+  scale_color_manual(values = c("Yule-Walker" = "red3", 
+                                "Burg" = "steelblue", 
+                                "MLE" = "forestgreen")) +
+  labs(
+    title = "Estimation Bias: YW vs Burg vs MLE",
+    subtitle = "Bias = mean(φ̂) - φ | More negative = worse underestimation",
+    x = "True φ",
+    y = "Bias",
+    color = "Method"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+
+print(p2)
+
+# --- Plot 3: MSE Comparison ---
+plot_data_mse <- summary_stats %>%
+  select(true_phi, mse_yw, mse_burg, mse_mle) %>%
+  pivot_longer(cols = c(mse_yw, mse_burg, mse_mle), 
+               names_to = "method", values_to = "mse") %>%
+  mutate(method = recode(method, 
+                         mse_yw = "Yule-Walker", 
+                         mse_burg = "Burg", 
+                         mse_mle = "MLE"))
+
+p3 <- ggplot(plot_data_mse, aes(x = true_phi)) +
+  geom_line(aes(y = mse, color = method), linewidth = 1.2) +
+  geom_point(aes(y = mse, color = method), size = 2.5) +
+  scale_color_manual(values = c("Yule-Walker" = "red3", 
+                                "Burg" = "steelblue", 
+                                "MLE" = "forestgreen")) +
+  labs(
+    title = "Mean Squared Error: YW vs Burg vs MLE",
+    subtitle = "MSE = Bias² + Variance | Lower is better",
+    x = "True φ",
+    y = "MSE",
+    color = "Method"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+
+print(p3)
+
+# --- Plot 4: Variance Comparison ---
+plot_data_var <- summary_stats %>%
+  select(true_phi, var_yw, var_burg, var_mle) %>%
+  pivot_longer(cols = c(var_yw, var_burg, var_mle), 
+               names_to = "method", values_to = "variance") %>%
+  mutate(method = recode(method, 
+                         var_yw = "Yule-Walker", 
+                         var_burg = "Burg", 
+                         var_mle = "MLE"))
+
+p4 <- ggplot(plot_data_var, aes(x = true_phi)) +
+  geom_line(aes(y = variance, color = method), linewidth = 1.2) +
+  geom_point(aes(y = variance, color = method), size = 2.5) +
+  scale_color_manual(values = c("Yule-Walker" = "red3", 
+                                "Burg" = "steelblue", 
+                                "MLE" = "forestgreen")) +
+  labs(
+    title = "Variance of Estimates: YW vs Burg vs MLE",
+    subtitle = "Lower variance = more precise (but may still be biased)",
+    x = "True φ",
+    y = "Variance",
+    color = "Method"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+
+print(p4)
+
+# --- Print Summary Table ---
+cat("\n=== Bias Comparison (negative = biased low) ===\n")
+cat(sprintf("%-8s  %10s  %10s  %10s\n", "True φ", "YW Bias", "Burg Bias", "MLE Bias"))
+cat(sprintf("%-8s  %10s  %10s  %10s\n", "------", "--------", "---------", "--------"))
+for (i in 1:nrow(summary_stats)) {
+  row <- summary_stats[i, ]
+  cat(sprintf("%-8.3f  %10.4f  %10.4f  %10.4f\n", 
+              row$true_phi, row$bias_yw, row$bias_burg, row$bias_mle))
+}
+
+# --- Summary at high phi ---
+cat("\n=== Summary for φ ≥ 0.95 ===\n")
+high_phi <- summary_stats %>% filter(true_phi >= 0.95)
+cat(sprintf("Average YW bias:   %.4f\n", mean(high_phi$bias_yw)))
+cat(sprintf("Average Burg bias: %.4f\n", mean(high_phi$bias_burg)))
+cat(sprintf("Average MLE bias:  %.4f\n", mean(high_phi$bias_mle)))
+
+cat("\n=== MSE Comparison ===\n")
+cat(sprintf("%-8s  %10s  %10s  %10s\n", "True φ", "YW MSE", "Burg MSE", "MLE MSE"))
+cat(sprintf("%-8s  %10s  %10s  %10s\n", "------", "--------", "---------", "--------"))
+for (i in 1:nrow(summary_stats)) {
+  row <- summary_stats[i, ]
+  cat(sprintf("%-8.3f  %10.6f  %10.6f  %10.6f\n", 
+              row$true_phi, row$mse_yw, row$mse_burg, row$mse_mle))
+}
+
+cat("\n=== Variance Comparison ===\n")
+cat(sprintf("%-8s  %10s  %10s  %10s\n", "True φ", "YW Var", "Burg Var", "MLE Var"))
+cat(sprintf("%-8s  %10s  %10s  %10s\n", "------", "--------", "---------", "--------"))
+for (i in 1:nrow(summary_stats)) {
+  row <- summary_stats[i, ]
+  cat(sprintf("%-8.3f  %10.6f  %10.6f  %10.6f\n", 
+              row$true_phi, row$var_yw, row$var_burg, row$var_mle))
+}
+
+cat("\n=== MSE Decomposition for φ ≥ 0.95 ===\n")
+cat(sprintf("%-12s  %10s  %10s  %10s\n", "Method", "Bias²", "Variance", "MSE"))
+cat(sprintf("%-12s  %10s  %10s  %10s\n", "------", "------", "--------", "------"))
+cat(sprintf("%-12s  %10.6f  %10.6f  %10.6f\n", "Yule-Walker",
+            mean(high_phi$bias_yw)^2, mean(high_phi$var_yw), mean(high_phi$mse_yw)))
+cat(sprintf("%-12s  %10.6f  %10.6f  %10.6f\n", "Burg",
+            mean(high_phi$bias_burg)^2, mean(high_phi$var_burg), mean(high_phi$mse_burg)))
+cat(sprintf("%-12s  %10.6f  %10.6f  %10.6f\n", "MLE",
+            mean(high_phi$bias_mle)^2, mean(high_phi$var_mle), mean(high_phi$mse_mle)))
+
+```

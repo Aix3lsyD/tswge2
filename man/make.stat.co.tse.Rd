@@ -4,11 +4,28 @@
 \alias{make.stat.co.tse}
 \title{Create Cochrane-Orcutt Statistic Function}
 \usage{
-make.stat.co.tse(maxp = 5)
+make.stat.co.tse(
+  maxp = 5,
+  ar_method = c("mle", "burg"),
+  criterion = c("aic", "aicc", "bic"),
+  n_best = 3,
+  tol = 1.001
+)
 }
 \arguments{
 \item{maxp}{Integer. Maximum AR order to consider for the error model.
 Default is 5.}
+
+\item{ar_method}{Character. Method for AR estimation: \code{"mle"} or
+\code{"burg"}. Default is \code{"mle"}.}
+
+\item{criterion}{Character. Information criterion for order selection:
+\code{"aic"}, \code{"aicc"}, or \code{"bic"}. Default is \code{"aic"}.}
+
+\item{n_best}{Integer. For MLE, number of top models to check for
+stationarity. Default is 3.}
+
+\item{tol}{Numeric. Tolerance for stationarity check. Default is 1.001.}
 }
 \value{
 A function that takes a numeric vector \code{x} and returns
@@ -20,11 +37,19 @@ testing trend in a time series with autocorrelated errors.
 }
 \examples{
 \dontrun{
-stat_fn <- make.stat.co.tse(maxp = 3)
+# MLE-based statistic (default, less biased)
+stat_fn <- make.stat.co.tse(maxp = 5)
 result <- wbg.boot.test.tse(x, stat_fn = stat_fn)
+
+# Burg-based statistic (original WBG paper approach)
+stat_fn_burg <- make.stat.co.tse(maxp = 5, ar_method = "burg")
+result_burg <- wbg.boot.test.tse(x, stat_fn = stat_fn_burg)
+
+# Using BIC for model selection
+stat_fn_bic <- make.stat.co.tse(maxp = 5, criterion = "bic")
 }
 
 }
 \seealso{
-\code{\link{wbg.boot.test.tse}}, \code{\link{co.wge}}
+\code{\link{wbg.boot.test.tse}}, \code{\link{co.tse}}
 }
